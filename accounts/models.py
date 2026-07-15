@@ -135,11 +135,11 @@ class Feedback(BaseModel):
         ('product', 'Product'),
     ]
 
-    customer = models.ForeignKey(
+    submitted_by = models.ForeignKey(
         User,
         on_delete = models.CASCADE,
         related_name = 'feedback',
-        limit_choices_to = {'role': 'customer'}
+
     )
     branch = models.ForeignKey(
         'branches.Branch',
@@ -161,4 +161,4 @@ class Feedback(BaseModel):
     status = models.CharField(max_length = 10, choices = STATUS_CHOICES, default = 'pending')
 
     def __str__(self):
-        return f"{self.customer.username} - {self.title} ({self.status})"
+        return f"{self.submitted_by.username} - {self.title} ({self.status})"
