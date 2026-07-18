@@ -162,3 +162,35 @@ class Feedback(BaseModel):
 
     def __str__(self):
         return f"{self.submitted_by.username} - {self.title} ({self.status})"
+
+
+
+# ==================================================
+# Activity model
+# ==================================================
+class ActivityLog(BaseModel):
+    ACTION_CHOICES = [
+        ('login_success', 'Login Success'),
+        ('login_failed', 'Login Failed'),
+        ('password_changed', 'Password Changed'),
+        ('profile_updated', 'Profile Updated'),
+        ('order_placed', 'Order Placed'),
+        ('order_cancelled', 'Order Cancelled'),
+        ('feedback_submitted', 'Feedback Submitted'),
+        ('account_deleted', 'Account Deleted'),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete = models.CASCADE,
+        related_name = 'activity_logs',
+        null = True,
+        blank = True  # null for failed logins where user may not exist
+    )
+    action = models.CharField(max_length = 50, choices = ACTION_CHOICES)
+    ip_address = models.GenericIPAddressField(null = True, blank = True)
+    detail = models.TextField(blank = True)  # extra context e.g order id
+    created_at = models.DateTimeField(auto_now_add = True)
+
+    def __str__(self):
+        return f"{self.user.username if self.user else 'Unknown'} - {self.action} - {self.created_at}"

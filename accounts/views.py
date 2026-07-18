@@ -10,6 +10,8 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from django.db import models as db_models
+from .models import ActivityLog
+from .utils import GetClientIP
 
 from .models import AccountSuspension, BranchManagerProfile, PasswordResetOTP, CustomerProfile, User
 from .permissions import IsAdmin
@@ -98,6 +100,7 @@ def CustomerRegister(request):
 def Login(request):
     username = request.data.get('username')
     password = request.data.get('password')
+    ip = GetClientIP(request)
 
     if not username or not password:
         return Response({'message': 'Username and password are required'}, status = 400)
@@ -134,6 +137,13 @@ def Login(request):
     
     if not user:
         return Response({'message' : 'Invalid credentials'}, status = 401)
+    
+    ActivityLog.objects.create(
+        user = user,
+        action = 'login_success',
+        ip_address = ip,
+        detail = f'{user.role} logged in'
+    )
     
     refresh = RefreshToken.for_user(user)
 
@@ -385,6 +395,7 @@ def UpdateMyProfile(request):
 
     user.save()
 
+
     # Update profile fields based on role
     if user.is_customer() and hasattr(user, 'customer_profile'):
         p = user.customer_profile
@@ -394,6 +405,13 @@ def UpdateMyProfile(request):
         if 'profile_picture' in request.FILES:
             p.profile_picture = request.FILES['profile_picture']
         p.save()
+
+        ActivityLog.objects.create(
+            user = user,
+            action = 'profile_updated',
+            ip_address = GetClientIP(request),
+            detail = 'Profile updated'
+        )
 
         return Response({
             'message': 'Profile updated successfully',
@@ -418,6 +436,13 @@ def UpdateMyProfile(request):
         if 'profile_picture' in request.FILES:
             p.profile_picture = request.FILES['profile_picture']
         p.save()
+
+        ActivityLog.objects.create(
+            user = user,
+            action = 'profile_updated',
+            ip_address = GetClientIP(request),
+            detail = 'Profile updated'
+        )
 
         return Response({
             'message': 'Profile updated successfully',
@@ -574,6 +599,14 @@ def ChangePassword(request):
 
     user.set_password(new_password)
     user.save()
+
+    ActivityLog.objects.create(
+        user = user,
+        action = 'profile_updated',
+        ip_address = GetClientIP(request),
+        detail = 'Profile updated'
+    )
+
     return Response({'message': 'Password changed successfully'}, status = 200)
 
 
@@ -710,3 +743,104 @@ def DeleteMyAccount(request):
 
     user.delete()
     return Response({'message': 'Your account has been deleted successfully'}, status = 200)
+
+
+# =========================================================
+# View user Activity
+# =========================================================
+@api_view(['GET'])
+@permission_classes([IsAdmin])
+def UserActivity(request, user_id):
+    try:
+        user = User.objects.get(id = user_id)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status = 404)
+
+    logs = ActivityLog.objects.filter(
+        user = user
+    ).order_by('-created_at')
+
+    # Filter by action
+    action_filter = request.query_params.get('action')
+    if action_filter:
+        logs = logs.filter(action = action_filter)
+
+    data = []
+    for log in logs:
+        data.append({
+            'id': log.id,
+            'action': log.action,
+            'ip_address': log.ip_address,
+            'detail': log.detail,
+            'created_at': log.created_at,
+        })
+
+    # Summary counts
+    summary = {
+        'total_logins': logs.filter(action = 'login_success').count(),
+        'failed_logins': ActivityLog.objects.filter(
+            ip_address__in = logs.values_list('ip_address', flat = True),
+            action = 'login_failed'
+        ).count(),
+        'orders_placed': logs.filter(action = 'order_placed').count(),
+        'orders_cancelled': logs.filter(action = 'order_cancelled').count(),
+        'feedback_submitted': logs.filter(action = 'feedback_submitted').count(),
+    }
+
+    return Response({
+        'user': user.username,
+        'role': user.role,
+        'summary': summary,
+        'activity': data,
+    }, status = 200)
+
+
+# ====================================================
+# View all failed logins (admin only)
+# ====================================================
+@api_view(['GET'])
+@permission_classes([IsAdmin])
+def FailedLogins(request):
+    logs = ActivityLog.objects.filter(
+        action = 'login_failed'
+    ).order_by('-created_at')
+
+    data = []
+    for log in logs:
+        data.append({
+            'id': log.id,
+            'detail': log.detail,
+            'ip_address': log.ip_address,
+            'created_at': log.created_at,
+        })
+
+    return Response(data, status = 200)
+
+
+
+# ======================================================
+# View all activity(admin only)
+# ======================================================
+@api_view(['GET'])
+@permission_classes([IsAdmin])
+def AllActivity(request):
+    logs = ActivityLog.objects.select_related(
+        'user'
+    ).order_by('-created_at')
+
+    action_filter = request.query_params.get('action')
+    if action_filter:
+        logs = logs.filter(action = action_filter)
+
+    data = []
+    for log in logs:
+        data.append({
+            'id': log.id,
+            'user': log.user.username if log.user else 'Unknown',
+            'action': log.action,
+            'ip_address': log.ip_address,
+            'detail': log.detail,
+            'created_at': log.created_at,
+        })
+
+    return Response(data, status = 200)

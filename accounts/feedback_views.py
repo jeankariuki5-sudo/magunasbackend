@@ -1,5 +1,7 @@
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
+from .models import ActivityLog
+from .utils import GetClientIP
 
 from .models import Feedback
 from .permissions import IsAdmin, IsBranchManager, IsCustomer
@@ -52,6 +54,13 @@ def SubmitFeedback(request):
         feedback_type = feedback_type,
         branch = branch,
         order = order,
+    )
+
+    ActivityLog.objects.create(
+        user = request.user,
+        action = 'feedback_submitted',
+        ip_address = GetClientIP(request),
+        detail = f'Feedback: {feedback.title}'
     )
 
     return Response({

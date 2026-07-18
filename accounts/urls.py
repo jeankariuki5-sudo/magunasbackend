@@ -38,4 +38,9 @@ urlpatterns = [
 
     # feedback
     path('feedback/', include('accounts.feedback_urls')),
+
+    # user acticity
+    path('activity/', views.AllActivity),
+    path('activity/failed_logins/', views.FailedLogins),
+    path('users/activity/<int:user_id>/', views.UserActivity),
 ]

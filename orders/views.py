@@ -3,6 +3,8 @@ from django.db import transaction
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from accounts.models import ActivityLog
+from accounts.utils import GetClientIP
 
 from accounts.permissions import IsAdmin, IsBranchManager, IsCustomer, IsAdminOrBranchManager
 from branches.models import Branch, DeliveryZone
@@ -294,6 +296,13 @@ def PlaceOrder(request):
         status = 'placed'
     )
 
+    ActivityLog.objects.create(
+        user = request.user,
+        action = 'order_placed',
+        ip_address = GetClientIP(request),
+        detail = f'Order #{order.id} placed at {order.branch.branch_name}'
+    )
+
     # Create order items and decrement stock atomically
     for item in cart_items:
         bp = item.branch_product
@@ -434,6 +443,13 @@ def CancelOrder(request, order_id):
 
     order.status = 'cancelled'
     order.save()
+
+    ActivityLog.objects.create(
+        user = request.user,
+        action = 'order_cancelled',
+        ip_address = GetClientIP(request),
+        detail = f'Order #{order.id} cancelled'
+    )
 
     return Response({
         'message': f'Order #{order.id} cancelled successfully',
