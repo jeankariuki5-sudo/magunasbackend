@@ -1,7 +1,7 @@
 from django.utils import timezone
 from django.core.mail import send_mail
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.shortcuts import render
 from django.contrib.auth import authenticate
 from rest_framework.decorators import api_view, permission_classes
@@ -153,14 +153,19 @@ def Login(request):
     user = authenticate(username = username, password = password)
     
     if not user:
-        return Response({'message' : 'Invalid credentials'}, status = 401)
-    
-    ActivityLog.objects.create(
-        user = user,
-        action = 'login_success',
-        ip_address = ip,
-        detail = f'{user.role} logged in'
-    )
+    # NEW: Try to find the account being targeted
+    # Check by username or email so we can link the log to a real account
+        targeted_user = User.objects.filter(
+            models.Q(username = username) | models.Q(email = username)
+        ).first()
+
+        ActivityLog.objects.create(
+            user = targeted_user,  # links to account if found, None if username doesn't exist
+            action = 'login_failed',
+            ip_address = GetClientIP(request),
+            detail = f'Failed login attempt for username: {username}'
+        )
+        return Response({'error': 'Invalid credentials'}, status = 401)
     
     refresh = RefreshToken.for_user(user)
 
@@ -841,20 +846,19 @@ def UserActivity(request, user_id):
 def FailedLogins(request):
     logs = ActivityLog.objects.filter(
         action = 'login_failed'
-    ).order_by('-created_at')
+    ).select_related('user').order_by('-created_at')
 
     data = []
     for log in logs:
         data.append({
             'id': log.id,
+            'targeted_username': log.user.username if log.user else 'Unknown — username does not exist',
             'detail': log.detail,
             'ip_address': log.ip_address,
             'created_at': log.created_at,
         })
 
     return Response(data, status = 200)
-
-
 
 # ======================================================
 # View all activity(admin only)
