@@ -17,6 +17,11 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from django.conf import settings
+from django.conf.urls.static import static
+from django.http import JsonResponse
+
+handler403 = 'magunasbackend.exceptions.Handler403'
 
 
 urlpatterns = [
@@ -28,9 +33,9 @@ urlpatterns = [
 
 
     path('api/accounts/', include('accounts.urls')),
-    # path('api/analytics/', include('analytics.urls')),
+    path('api/analytics/', include('analytics.urls')),
     path('api/branches/', include('branches.urls')),
     path('api/orders/', include('orders.urls')),
-    # path('api/payments/', include('payments.urls')),
+    path('api/payments/', include('payments.urls')),
     path('api/products/', include('products.urls')),
-]
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

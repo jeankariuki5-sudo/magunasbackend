@@ -18,6 +18,7 @@ urlpatterns = [
 
     # Branch product
     path('list_branch_products/', views.ListBranchProducts),
+    path('list_branch_products/<int:branch_id>/', views.ListBranchProducts),
     path('add_branch_product/', views.AddBranchProduct),
     path('update_branch_product/', views.UpdateBranchProduct),
     path('delete_branch_product/', views.DeleteBranchProduct),

@@ -8,60 +8,63 @@ from rest_framework.response import Response
 
 from .permissions import IsAdmin, IsBranchManager, IsCustomer
 from .models import User, AccountSuspension
-from .dashboard_serializers import OrderSerializer, LowStockSerializer, SuspensionSerializer
-
+from .dashboard_serializers import (
+    OrderSerializer,
+    LowStockSerializer,
+    SuspensionSerializer
+)
 from branches.models import Branch
 from products.models import BranchProduct
 from orders.models import Order
 
 
+# ══════════════════════════════════════════════════════
+# ADMIN DASHBOARD
+# ══════════════════════════════════════════════════════
 
-# ==============================================
-# Admin dashboard
-# ==============================================
 @api_view(['GET'])
 @permission_classes([IsAdmin])
 def AdminDashboard(request):
-    # Users
-    total_customers = User.objects.filter(role='customer').count()
-    total_managers = User.objects.filter(role='branch_manager').count()
+    # ── Users ──
+    total_customers = User.objects.filter(role = 'customer').count()
+    total_managers = User.objects.filter(role = 'branch_manager').count()
     total_suspended = AccountSuspension.objects.count()
 
-    # Branches
+    # ── Branches ──
     total_branches = Branch.objects.count()
-    active_branches = Branch.objects.filter(is_active=True).count()
-    inactive_branches = Branch.objects.filter(is_active=False).count()
+    active_branches = Branch.objects.filter(is_active = True).count()
+    inactive_branches = Branch.objects.filter(is_active = False).count()
 
-    # Orders
+    # ── Orders ──
     all_orders = Order.objects.all()
     total_orders = all_orders.count()
-    pending_orders = all_orders.filter(status='placed').count()
-    completed_orders = all_orders.filter(status='completed').count()
-    cancelled_orders = all_orders.filter(status='cancelled').count()
+    pending_orders = all_orders.filter(status = 'placed').count()
+    completed_orders = all_orders.filter(status = 'completed').count()
+    cancelled_orders = all_orders.filter(status = 'cancelled').count()
 
-    # Revenue 
+    # ── Revenue ──
     total_revenue = all_orders.filter(
-        status='completed'
-    ).aggregate(total=Sum('total_amount'))['total'] or 0
+        status = 'completed'
+    ).aggregate(total = Sum('total_amount'))['total'] or 0
 
-    # Recent orders
+    # ── Recent orders ──
     recent_orders = Order.objects.select_related(
         'customer', 'branch'
     ).order_by('-created_at')[:10]
-    recent_orders_data = OrderSerializer(recent_orders, many=True).data
+    recent_orders_data = OrderSerializer(recent_orders, many = True).data
 
-    # Low stock products (stock < 10)
+    # ── Low stock products (stock < 10) ──
     low_stock = BranchProduct.objects.filter(
-        stock_quantity__lt=10,
-        is_available=True
+        stock_quantity__lt = 10,
+        is_available = True
     ).select_related('product', 'branch')
-    low_stock_data = LowStockSerializer(low_stock, many=True).data
+    low_stock_data = LowStockSerializer(low_stock, many = True).data
 
-    # Recent suspensions
+    # ── Recent suspensions ──
     suspensions = AccountSuspension.objects.select_related(
         'user', 'suspended_by'
     ).order_by('-suspended_at')[:5]
-    suspensions_data = SuspensionSerializer(suspensions, many=True).data
+    suspensions_data = SuspensionSerializer(suspensions, many = True).data
 
     return Response({
         'users': {
@@ -86,70 +89,70 @@ def AdminDashboard(request):
         'recent_orders': recent_orders_data,
         'low_stock_products': low_stock_data,
         'recent_suspensions': suspensions_data,
-    }, status=200)
+    }, status = 200)
 
 
+# ══════════════════════════════════════════════════════
+# BRANCH MANAGER DASHBOARD
+# ══════════════════════════════════════════════════════
 
-# =======================================
-# Branch manager dashboard
-# =======================================
 @api_view(['GET'])
 @permission_classes([IsBranchManager])
 def BranchManagerDashboard(request):
     try:
         branch = request.user.managed_branch
     except Exception:
-        return Response({'error': 'You are not assigned to any branch'}, status=404)
+        return Response({'error': 'You are not assigned to any branch'}, status = 404)
 
-    # time settings
+    # ── Time settings ──
     today = timezone.now().date()
-    month_start = today.replace(day=1)
+    month_start = today.replace(day = 1)
 
-    # Branch orders
-    branch_orders = Order.objects.filter(branch=branch)
+    # ── Branch orders ──
+    branch_orders = Order.objects.filter(branch = branch)
     total_orders = branch_orders.count()
-    pending_orders = branch_orders.filter(status='placed').count()
-    packed_orders = branch_orders.filter(status='packed').count()
-    out_for_delivery = branch_orders.filter(status='out_for_delivery').count()
-    ready_for_pickup = branch_orders.filter(status='ready_for_pickup').count()
-    completed_orders = branch_orders.filter(status='completed').count()
-    cancelled_orders = branch_orders.filter(status='cancelled').count()
+    pending_orders = branch_orders.filter(status = 'placed').count()
+    packed_orders = branch_orders.filter(status = 'packed').count()
+    out_for_delivery = branch_orders.filter(status = 'out_for_delivery').count()
+    ready_for_pickup = branch_orders.filter(status = 'ready_for_pickup').count()
+    completed_orders = branch_orders.filter(status = 'completed').count()
+    cancelled_orders = branch_orders.filter(status = 'cancelled').count()
 
-    # Revenue
+    # ── Revenue ──
     total_revenue = branch_orders.filter(
-        status='completed'
-    ).aggregate(total=Sum('total_amount'))['total'] or 0
+        status = 'completed'
+    ).aggregate(total = Sum('total_amount'))['total'] or 0
 
     todays_revenue = branch_orders.filter(
-        status='completed',
-        created_at__date=today
-    ).aggregate(total=Sum('total_amount'))['total'] or 0
+        status = 'completed',
+        created_at__date = today
+    ).aggregate(total = Sum('total_amount'))['total'] or 0
 
     monthly_revenue = branch_orders.filter(
-        status='completed',
-        created_at__date__gte=month_start
-    ).aggregate(total=Sum('total_amount'))['total'] or 0
+        status = 'completed',
+        created_at__date__gte = month_start
+    ).aggregate(total = Sum('total_amount'))['total'] or 0
 
-    # Recent orders
+    # ── Recent orders ──
     recent_orders = branch_orders.select_related(
         'customer', 'branch'
     ).order_by('-created_at')[:10]
-    recent_orders_data = OrderSerializer(recent_orders, many=True).data
+    recent_orders_data = OrderSerializer(recent_orders, many = True).data
 
-    # Low stock products 
+    # ── Low stock products ──
     low_stock = BranchProduct.objects.filter(
-        branch=branch,
-        stock_quantity__lt=10,
-        is_available=True
+        branch = branch,
+        stock_quantity__lt = 10,
+        is_available = True
     ).select_related('product', 'branch')
-    low_stock_data = LowStockSerializer(low_stock, many=True).data
+    low_stock_data = LowStockSerializer(low_stock, many = True).data
 
-    # Products summary
-    total_products = BranchProduct.objects.filter(branch=branch).count()
+    # ── Products summary ──
+    total_products = BranchProduct.objects.filter(branch = branch).count()
     available_products = BranchProduct.objects.filter(
-        branch=branch,
-        is_available=True,
-        stock_quantity__gt=0
+        branch = branch,
+        is_available = True,
+        stock_quantity__gt = 0
     ).count()
 
     return Response({
@@ -181,13 +184,13 @@ def BranchManagerDashboard(request):
         },
         'recent_orders': recent_orders_data,
         'low_stock_products': low_stock_data,
-    }, status=200)
+    }, status = 200)
 
 
+# ══════════════════════════════════════════════════════
+# CUSTOMER DASHBOARD
+# ══════════════════════════════════════════════════════
 
-# =================================================
-# Cuatomer dashboard
-# =================================================
 @api_view(['GET'])
 @permission_classes([IsCustomer])
 def CustomerDashboard(request):
@@ -196,21 +199,21 @@ def CustomerDashboard(request):
     try:
         profile = user.customer_profile
     except Exception:
-        return Response({'error': 'Customer profile not found'}, status=404)
+        return Response({'error': 'Customer profile not found'}, status = 404)
 
-    # Order stats
-    customer_orders = Order.objects.filter(customer=user)
+    # ── Order stats ──
+    customer_orders = Order.objects.filter(customer = user)
     total_orders = customer_orders.count()
-    pending_orders = customer_orders.filter(status='placed').count()
-    completed_orders = customer_orders.filter(status='completed').count()
-    cancelled_orders = customer_orders.filter(status='cancelled').count()
+    pending_orders = customer_orders.filter(status = 'placed').count()
+    completed_orders = customer_orders.filter(status = 'completed').count()
+    cancelled_orders = customer_orders.filter(status = 'cancelled').count()
 
-    # Total spent 
+    # ── Total spent ──
     total_spent = customer_orders.filter(
-        status='completed'
-    ).aggregate(total=Sum('total_amount'))['total'] or 0
+        status = 'completed'
+    ).aggregate(total = Sum('total_amount'))['total'] or 0
 
-    # Cart summary 
+    # ── Cart summary ──
     cart_data = {}
     if hasattr(user, 'cart'):
         cart = user.cart
@@ -250,13 +253,13 @@ def CustomerDashboard(request):
         },
         'total_spent': str(total_spent),
         'cart': cart_data,
-    }, status=200)
+    }, status = 200)
 
 
+# ══════════════════════════════════════════════════════
+# CUSTOMER ORDER HISTORY
+# ══════════════════════════════════════════════════════
 
-# =============================================
-# Customer history
-# =============================================
 class CustomerOrderHistory(generics.ListAPIView):
     serializer_class = OrderSerializer
     permission_classes = [IsCustomer]
@@ -264,7 +267,7 @@ class CustomerOrderHistory(generics.ListAPIView):
     def get_queryset(self):
         return (
             Order.objects
-            .filter(customer=self.request.user)
+            .filter(customer = self.request.user)
             .select_related('branch', 'customer')
             .prefetch_related('items__branch_product__product')
             .order_by('-created_at')

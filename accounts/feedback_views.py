@@ -2,10 +2,17 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from .models import ActivityLog
 from .utils import GetClientIP
+from django_ratelimit.decorators import ratelimit
+from django_ratelimit.exceptions import Ratelimited
 
 from .models import Feedback
 from .permissions import IsAdmin, IsBranchManager, IsCustomer
 
+
+def RateLimitedResponse():
+    return Response({
+        'error': 'Too many requests. Please slow down and try again shortly.'
+    }, status = 429)
 
 # ===========================================================
 # CUSTOMER FEEDBACK
@@ -16,12 +23,16 @@ from .permissions import IsAdmin, IsBranchManager, IsCustomer
 # ===========================================================
 @api_view(['POST'])
 @permission_classes([IsCustomer])
+@ratelimit(key = 'user', rate = '10/h', block = False)
 def SubmitFeedback(request):
     title = request.data.get('title')
     description = request.data.get('description')
     feedback_type = request.data.get('feedback_type', 'general')
     branch_id = request.data.get('branch_id')
     order_id = request.data.get('order_id')
+
+    if getattr(request, 'limited', False):
+        return RateLimitedResponse()
 
     if not title or not description:
         return Response({'error': 'title and description are required'}, status = 400)

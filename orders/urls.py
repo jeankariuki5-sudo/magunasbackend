@@ -6,13 +6,13 @@ urlpatterns = [
     # Cart
     path('view_cart/', views.ViewCart),
     path('add_to_cart/', views.AddToCart),
-    path('update_cart_item/', views.UpdateCartItem),
+    path('update_cart_item/<int:cart_item_id>/', views.UpdateCartItem),
     path('clear_cart/', views.ClearCart),
-    path('remove_cart_item/', views.RemoveCartItem),
+    path('remove_cart_item/<int:cart_item_id>/', views.RemoveCartItem),
 
     # Orders
     path('place_order/', views.PlaceOrder),
-    path('get_my_order/', views.GetMyOrder),
+    path('get_my_order/<int:order_id>/', views.GetMyOrder),
     path('cancel_order/', views.CancelOrder),
     path('my_orders/', views.MyOrders),
 

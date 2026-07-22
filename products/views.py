@@ -38,7 +38,7 @@ def ListCategories(request):
 # Create category
 # ======================================================
 @api_view(['POST'])
-@permission_classes([IsAdminOrBranchManager])
+@permission_classes([IsAdmin])
 def CreateCategory(request):
     category_name = request.data.get('category_name')
     image = request.FILES.get('image')
@@ -73,7 +73,7 @@ def CreateCategory(request):
 # Update category
 # ======================================================
 @api_view(['PUT'])
-@permission_classes([IsAdminOrBranchManager])
+@permission_classes([IsAdmin])
 def UpdateCategory(request, category_id):
     try:
         category = Category.objects.get(id = category_id)
@@ -109,7 +109,7 @@ def UpdateCategory(request, category_id):
 # Delete category
 # ======================================================
 @api_view(['DELETE'])
-@permission_classes([IsAdminOrBranchManager])
+@permission_classes([IsAdmin])
 def DeleteCategory(request, category_id):
     try:
         category = Category.objects.get(id = category_id)
@@ -191,7 +191,7 @@ def GetProduct(request, product_id):
 # Create product
 # ======================================================
 @api_view(['POST'])
-@permission_classes([IsAdminOrBranchManager])
+@permission_classes([IsAdmin])
 def CreateProduct(request):
     product_name = request.data.get('product_name')
     description = request.data.get('description', '')
@@ -233,7 +233,7 @@ def CreateProduct(request):
 # Update product
 # ======================================================
 @api_view(['PUT'])
-@permission_classes([IsAdminOrBranchManager])
+@permission_classes([IsAdmin])
 def UpdateProduct(request, product_id):
     try:
         product = Product.objects.select_related('category').get(id = product_id)
@@ -278,7 +278,7 @@ def UpdateProduct(request, product_id):
 # Delete product
 # ======================================================
 @api_view(['DELETE'])
-@permission_classes([IsAdminOrBranchManager])
+@permission_classes([IsAdmin])
 def DeleteProduct(request, product_id):
     try:
         product = Product.objects.get(id = product_id)

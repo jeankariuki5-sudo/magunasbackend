@@ -5,7 +5,10 @@ from .models import AccountSuspension
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
-    product = serializers.CharField(source = 'branch_product.product.product_name', read_only = True)
+    product = serializers.CharField(
+        source = 'branch_product.product.product_name',
+        read_only = True
+    )
 
     class Meta:
         model = OrderItem
@@ -13,8 +16,14 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
 
 class OrderSerializer(serializers.ModelSerializer):
-    customer = serializers.CharField(source = 'customer.username', read_only = True)
-    branch = serializers.CharField(source = 'branch.branch_name', read_only = True)
+    customer = serializers.CharField(
+        source = 'customer.username',
+        read_only = True
+    )
+    branch = serializers.CharField(
+        source = 'branch.branch_name',
+        read_only = True
+    )
     items = OrderItemSerializer(many = True, read_only = True)
 
     class Meta:
@@ -33,8 +42,14 @@ class OrderSerializer(serializers.ModelSerializer):
 
 
 class LowStockSerializer(serializers.ModelSerializer):
-    product = serializers.CharField(source = 'product.product_name', read_only = True)
-    branch = serializers.CharField(source = 'branch.branch_name', read_only = True)
+    product = serializers.CharField(
+        source = 'product.product_name',
+        read_only = True
+    )
+    branch = serializers.CharField(
+        source = 'branch.branch_name',
+        read_only = True
+    )
 
     class Meta:
         model = BranchProduct
@@ -42,8 +57,14 @@ class LowStockSerializer(serializers.ModelSerializer):
 
 
 class SuspensionSerializer(serializers.ModelSerializer):
-    user = serializers.CharField(source = 'user.username', read_only = True)
-    suspended_by = serializers.CharField(source = 'suspended_by.username', read_only  =True)
+    user = serializers.CharField(
+        source = 'user.username',
+        read_only = True
+    )
+    suspended_by = serializers.CharField(
+        source = 'suspended_by.username',
+        read_only = True  # ← fixed extra space
+    )
 
     class Meta:
         model = AccountSuspension

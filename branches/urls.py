@@ -11,4 +11,16 @@ urlpatterns = [
     path('assign_manager/<int:branch_id>/', views.AssignManager),
     path('list_managers/', views.ListManagers),
     path('my_branch/', views.MyBranch),
+
+    # Delivery zones
+    path('delivery_zones/<int:branch_id>/', views.ListDeliveryZones),
+    path('delivery_zones/create/', views.CreateDeliveryZone),
+    path('delivery_zones/update/<int:zone_id>/', views.UpdateDeliveryZone),
+    path('delivery_zones/delete/<int:zone_id>/', views.DeleteDeliveryZone),
+    path('delivery_zones/my_branch/', views.MyBranchDeliveryZones),
+
+    # Geolocation
+    path('nearest/', views.NearestBranch),
+    path('nearest/product/<int:product_id>/', views.NearestBranchWithProduct),
+
 ]

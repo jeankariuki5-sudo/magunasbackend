@@ -1,8 +1,10 @@
-# from django.urls import path, include
-# from accounts import views, dashboard_views
-# from .dashboard_views import CustomerOrderHistory
+from django.urls import path
+from payments import views
 
 
-# urlpatterns = [
-
-# ]
+urlpatterns = [
+    path("make_payment/<int:order_id>/", views.InitiatePayment),
+    path('payment_status/', views.CheckPaymentStatus),
+    path('callback/', views.MpesaCallback),
+    path('view_all_payments/', views.AllPayments),
+]

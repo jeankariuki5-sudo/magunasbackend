@@ -190,3 +190,15 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = config('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = config('EMAIL_HOST_USER')
+
+
+# ─── RATE LIMITING ────────────────────────────────────────────────────────────
+RATELIMIT_ENABLE = True
+RATELIMIT_USE_CACHE = 'default'
+
+# Cache config needed for rate limiting
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+    }
+}

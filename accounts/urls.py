@@ -1,10 +1,12 @@
 from django.urls import path, include
 from accounts import views, dashboard_views
 from .dashboard_views import CustomerOrderHistory
+from rest_framework_simplejwt.views import TokenRefreshView
 
 
 urlpatterns = [
     # User auth
+    path('token/refresh/', TokenRefreshView.as_view(), name = 'token-refresh'),
     path('auth/customer_register/',views.CustomerRegister ),
     path('auth/login/', views.Login),
     path('auth/logout/', views.Logout),
@@ -24,9 +26,9 @@ urlpatterns = [
     path('auth/list_users/', views.ListUsers),
     path('auth/get_user/<int:user_id>/', views.GetUser),
     # path('auth/delete/<int:user_id>/', views.AdminDeleteAdmin),
-    path('auth/suspend_user/<int:id>/', views.SuspendUser),
-    path('auth/unsuspend_user/<int:id>/', views.UnsuspendUser),
-    path('auth/suspension_status/', views.SuspensionStatus),
+    path('auth/suspend_user/<int:user_id>/', views.SuspendUser),
+    path('auth/unsuspend_user/<int:user_id>/', views.UnsuspendUser),
+    path('auth/suspension_status/<int:user_id>/', views.SuspensionStatus),
 
 
     # Dashboard
@@ -40,7 +42,7 @@ urlpatterns = [
     path('feedback/', include('accounts.feedback_urls')),
 
     # user acticity
-    path('activity/', views.AllActivity),
-    path('activity/failed_logins/', views.FailedLogins),
+    path('users/activity/', views.AllActivity),
+    path('users/activity/failed_logins/', views.FailedLogins),
     path('users/activity/<int:user_id>/', views.UserActivity),
 ]

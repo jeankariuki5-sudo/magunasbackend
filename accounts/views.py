@@ -12,9 +12,18 @@ from rest_framework_simplejwt.exceptions import TokenError
 from django.db import models as db_models
 from .models import ActivityLog
 from .utils import GetClientIP
+from django_ratelimit.decorators import ratelimit
+from django.utils.decorators import method_decorator
+from django_ratelimit.exceptions import Ratelimited
 
 from .models import AccountSuspension, BranchManagerProfile, PasswordResetOTP, CustomerProfile, User
 from .permissions import IsAdmin
+
+
+def RateLimitedResponse():
+    return Response({
+        'error': 'Too many requests. Please slow down and try again shortly.'
+    }, status = 429)
 
 # Create your views here.
 
@@ -23,6 +32,7 @@ from .permissions import IsAdmin
 # ========================================
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@ratelimit(key = 'ip', rate = '3/m', block = False)
 @transaction.atomic
 def CustomerRegister(request):
     username = request.data.get('username')
@@ -33,6 +43,9 @@ def CustomerRegister(request):
     first_name = request.data.get('first_name')
     last_name = request.data.get('last_name')
     default_delivery_address = request.data.get('default_delivery_address', '')
+
+    if getattr(request, 'limited', False):
+        return RateLimitedResponse()
 
     # Validate required fields
     if not all([username, email, password, password2, first_name, last_name]):
@@ -97,10 +110,14 @@ def CustomerRegister(request):
 # =============================================
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@ratelimit(key = 'ip', rate = '5/m', block = False)
 def Login(request):
     username = request.data.get('username')
     password = request.data.get('password')
     ip = GetClientIP(request)
+
+    if getattr(request, 'limited', False):
+        return RateLimitedResponse()
 
     if not username or not password:
         return Response({'message': 'Username and password are required'}, status = 400)
@@ -469,7 +486,14 @@ def UpdateMyProfile(request):
 # ==========================================================
 @api_view(['POST'])
 @permission_classes([IsAdmin])
+@ratelimit(key = 'user', rate = '20/m', block = False)
 def SuspendUser(request, user_id):
+
+    if getattr(request, 'limited', False):
+        return Response({
+            'error': 'Too many requests. Please slow down and try again shortly.'
+        }, status = 429)
+    
     try:
         user = User.objects.get(id = user_id)
     except User.DoesNotExist:
@@ -582,11 +606,17 @@ def SuspensionStatus(request, user_id):
 # =============================================================
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@ratelimit(key = 'user', rate = '5/m', block = False)
 def ChangePassword(request):
     user = request.user
     old_password = request.data.get('old_password')
     new_password = request.data.get('new_password')
     new_password2 = request.data.get('new_password2')
+
+    if getattr(request, 'limited', False):
+        return Response({
+            'error': 'Too many requests. Please slow down and try again shortly.'
+        }, status = 429)
 
     if not all([old_password, new_password, new_password2]):
         return Response({'error': 'old_password, new_password and new_password2 are required'}, status = 400)
@@ -616,8 +646,12 @@ def ChangePassword(request):
 # ===================================================
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@ratelimit(key = 'ip', rate = '3/m', block = False)
 def ForgotPassword(request):
     email = request.data.get('email')
+
+    if getattr(request, 'limited', False):
+        return RateLimitedResponse()
 
     if not email:
         return Response({'error': 'Email is required'}, status=400)
@@ -663,11 +697,15 @@ Magunas Supermarket
 # ===============================================
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@ratelimit(key = 'ip', rate = '5/m', block = False)
 def ResetPassword(request):
     email = request.data.get('email')
     otp = request.data.get('otp')
     new_password = request.data.get('new_password')
     new_password2 = request.data.get('new_password2')
+
+    if getattr(request, 'limited', False):
+        return RateLimitedResponse()
 
     if not all([email, otp, new_password, new_password2]):
         return Response({'error': 'email, otp, new_password and new_password2 are required'}, status = 400)

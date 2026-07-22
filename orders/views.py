@@ -5,11 +5,25 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from accounts.models import ActivityLog
 from accounts.utils import GetClientIP
+from django_ratelimit.decorators import ratelimit
+from django_ratelimit.exceptions import Ratelimited
+from django.http import JsonResponse
 
 from accounts.permissions import IsAdmin, IsBranchManager, IsCustomer, IsAdminOrBranchManager
 from branches.models import Branch, DeliveryZone
 from products.models import BranchProduct
 from .models import Cart, CartItem, Order, OrderItem
+
+def Handler403(request, exception = None):
+    # NEW: Return 429 for rate limit, 403 for everything else
+    if isinstance(exception, Ratelimited):
+        return JsonResponse({
+            'error': 'Too many requests. Please slow down and try again shortly.'
+        }, status = 429)
+
+    return JsonResponse({
+        'error': 'Permission denied.'
+    }, status = 403)
 
 # Create your views here.
 # ======================================================
@@ -70,15 +84,22 @@ def ViewCart(request):
 
 @api_view(['POST'])
 @permission_classes([IsCustomer])
+@ratelimit(key = 'user', rate = '30/m', block = False)
 def AddToCart(request):
     branch_product_id = request.data.get('branch_product_id')
     quantity = int(request.data.get('quantity', 1))
+
+    if getattr(request, 'limited', False):
+        return Response({'error': 'Too many requests. Please slow down.'}, status = 429)
 
     if not branch_product_id:
         return Response({'error': 'branch_product_id is required'}, status = 400)
 
     if quantity < 1:
         return Response({'error': 'Quantity must be at least 1'}, status = 400)
+    
+    if quantity > 100:
+        return Response({'error': 'Maximum quantity per item is 100'}, status = 400)
 
     # Validate branch product
     try:
@@ -87,11 +108,24 @@ def AddToCart(request):
         ).get(id = branch_product_id, is_available = True)
     except BranchProduct.DoesNotExist:
         return Response({'error': 'Product not found or unavailable'}, status = 404)
+    
 
-    # Check stock
-    if branch_product.stock_quantity < quantity:
+    # Check total quantity in cart + new quantity doesn't exceed stock
+    cart_check = Cart.objects.filter(customer = request.user).first()
+    existing_cart_item = None
+    if cart_check:
+        existing_cart_item = CartItem.objects.filter(
+            cart = cart_check,
+            branch_product = branch_product
+        ).first()
+
+    current_cart_quantity = existing_cart_item.quantity if existing_cart_item else 0
+    total_requested = current_cart_quantity + quantity
+
+    if branch_product.stock_quantity < total_requested:
         return Response({
-            'error': f'Not enough stock. Only {branch_product.stock_quantity} available.'
+            'error': f'Not enough stock. Only {branch_product.stock_quantity} available '
+                     f'and you already have {current_cart_quantity} in your cart.'
         }, status = 400)
 
     # Get or create cart
@@ -151,6 +185,9 @@ def UpdateCartItem(request, cart_item_id):
     quantity = int(quantity)
     if quantity < 1:
         return Response({'error': 'Quantity must be at least 1'}, status = 400)
+    
+    if quantity > 100:
+        return Response({'error': 'Maximum quantity per item is 100'}, status = 400)
 
     try:
         cart_item = CartItem.objects.select_related(
@@ -227,11 +264,15 @@ def ClearCart(request):
 
 @api_view(['POST'])
 @permission_classes([IsCustomer])
+@ratelimit(key = 'ip', rate = '10/m', block = False)
 @transaction.atomic
 def PlaceOrder(request):
     fulfillment_type = request.data.get('fulfillment_type')  # delivery or pickup
     delivery_address = request.data.get('delivery_address', '')
     delivery_zone_id = request.data.get('delivery_zone_id')
+
+    if getattr(request, 'limited', False):
+        return Response({'error': 'Too many requests. Please slow down.'}, status = 429)
 
     if not fulfillment_type:
         return Response({'error': 'fulfillment_type is required (delivery or pickup)'}, status = 400)
@@ -421,8 +462,13 @@ def GetMyOrder(request, order_id):
 # ===================================================
 @api_view(['POST'])
 @permission_classes([IsCustomer])
+@ratelimit(key = 'ip', rate = '10/h', block = False)
 @transaction.atomic
 def CancelOrder(request, order_id):
+
+    if getattr(request, 'limited', False):
+        return Response({'error': 'Too many requests. Please slow down.'}, status = 429)
+
     try:
         order = Order.objects.get(id = order_id, customer = request.user)
     except Order.DoesNotExist:
@@ -433,6 +479,13 @@ def CancelOrder(request, order_id):
 
     if order.status == 'completed':
         return Response({'error': 'Completed orders cannot be cancelled'}, status = 400)
+    
+    # Prevent cancellation if payment was successful
+    if hasattr(order, 'payment') and order.payment.status == 'success':
+        return Response({
+            'error': 'Cannot cancel a paid order. Contact support for a refund.'
+        }, status = 400)
+
 
     # Restore stock for each item
     order_items = order.items.select_related('branch_product')
@@ -523,31 +576,34 @@ def UpdateOrderStatus(request, order_id):
     new_status = request.data.get('status')
 
     if not new_status:
-        return Response({'error': 'status is required'}, status=400)
+        return Response({'error': 'status is required'}, status = 400)
 
     valid_statuses = ['placed', 'packed', 'out_for_delivery', 'ready_for_pickup', 'completed', 'cancelled']
     if new_status not in valid_statuses:
         return Response({
             'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
-        }, status=400)
+        }, status = 400)
 
+    # Fetch order
     try:
-        # Branch manager can only update their own branch orders
-        if request.user.role == 'branch_manager':
-            branch = request.user.managed_branch
-            order = Order.objects.get(id=order_id, branch=branch)
-        else:
-            order = Order.objects.get(id=order_id)
+        order = Order.objects.get(id = order_id)
     except Order.DoesNotExist:
-        return Response({'error': 'Order not found'}, status=404)
-    except Exception:
-        return Response({'error': 'You are not assigned to any branch'}, status=404)
+        return Response({'error': 'Order not found'}, status = 404)
+
+    # Prevent branch manager from updating orders from other branches
+    if request.user.role == 'branch_manager':
+        try:
+            branch = request.user.managed_branch
+        except Exception:
+            return Response({'error': 'You are not assigned to any branch'}, status = 404)
+        if order.branch != branch:
+            return Response({'error': 'You can only update orders from your own branch'}, status = 403)
 
     if order.status == 'completed':
-        return Response({'error': 'Completed orders cannot be updated'}, status=400)
+        return Response({'error': 'Completed orders cannot be updated'}, status = 400)
 
     if order.status == 'cancelled':
-        return Response({'error': 'Cancelled orders cannot be updated'}, status=400)
+        return Response({'error': 'Cancelled orders cannot be updated'}, status = 400)
 
     order.status = new_status
     order.save()
@@ -557,7 +613,7 @@ def UpdateOrderStatus(request, order_id):
         'order_id': order.id,
         'status': order.status,
         'updated_at': order.updated_at,
-    }, status=200)
+    }, status = 200)
 
 
 # ======================================================
