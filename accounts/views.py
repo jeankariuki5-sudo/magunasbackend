@@ -116,16 +116,17 @@ def Login(request):
     password = request.data.get('password')
     ip = GetClientIP(request)
 
+    # Check if rate limited
     if getattr(request, 'limited', False):
         return RateLimitedResponse()
 
     if not username or not password:
-        return Response({'message': 'Username and password are required'}, status = 400)
-    
+        return Response({'error': 'Username and password are required'}, status = 400)
+
     # Check if username or email belongs to a suspended account
     suspended_user = User.objects.filter(
-        db_models.Q(username=username) | db_models.Q(email=username),
-        is_active=False
+        db_models.Q(username = username) | db_models.Q(email = username),
+        is_active = False
     ).first()
 
     if suspended_user and hasattr(suspended_user, 'suspension'):
@@ -143,43 +144,71 @@ def Login(request):
                     'suspension_type': suspension.suspension_type,
                     'reason': suspension.reason,
                     'lift_at': suspension.lift_at,
-                }, status=403)
+                }, status = 403)
         else:
             return Response({
                 'error': 'Your account has been permanently suspended.',
                 'reason': suspension.reason,
-            }, status=403)
+            }, status = 403)
 
     user = authenticate(username = username, password = password)
-    
+
     if not user:
-    # NEW: Try to find the account being targeted
-    # Check by username or email so we can link the log to a real account
+        # Try to find the account being targeted
+        # Links log to real account if username exists, None if it doesn't
         targeted_user = User.objects.filter(
-            models.Q(username = username) | models.Q(email = username)
+            db_models.Q(username = username) | db_models.Q(email = username)
         ).first()
 
+        # Log failed login attempt
         ActivityLog.objects.create(
-            user = targeted_user,  # links to account if found, None if username doesn't exist
+            user = targeted_user,
             action = 'login_failed',
-            ip_address = GetClientIP(request),
+            ip_address = ip,
             detail = f'Failed login attempt for username: {username}'
         )
         return Response({'error': 'Invalid credentials'}, status = 401)
-    
+
+    # Log successful login
+    ActivityLog.objects.create(
+        user = user,
+        action = 'login_success',
+        ip_address = ip,
+        detail = f'{user.role} logged in'
+    )
+
     refresh = RefreshToken.for_user(user)
 
+    # Build profile data based on role
+    profile_data = {}
+    if user.is_customer() and hasattr(user, 'customer_profile'):
+        p = user.customer_profile
+        profile_data = {
+            'first_name': p.first_name,
+            'last_name': p.last_name,
+            'default_delivery_address': p.default_delivery_address,
+        }
+    elif user.is_branch_manager() and hasattr(user, 'manager_profile'):
+        p = user.manager_profile
+        profile_data = {
+            'first_name': p.first_name,
+            'last_name': p.last_name,
+            'national_id': p.national_id,
+        }
+
     return Response({
-        'message' : 'Login Successful',
-        'user' : {
-            'username' : user.username,
-            'email' : user.email,
-            'phone_number' : user.phone_number,
-            'role' : user.role,
+        'message': 'Login successful',
+        'user': {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'phone_number': user.phone_number,
+            'role': user.role,
         },
-        'tokens' : {
-            'access' : str(refresh.access_token),
-            'refresh' : str(refresh),
+        'profile': profile_data,
+        'tokens': {
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
         }
     }, status = 200)
 
