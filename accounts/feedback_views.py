@@ -212,7 +212,7 @@ def BranchFeedback(request):
 
     feedback = Feedback.objects.filter(
         branch = branch
-    ).select_related('customer', 'order').order_by('-created_at')
+    ).select_related('submitted_by', 'order').order_by('-created_at')
 
     status_filter = request.query_params.get('status')
     if status_filter:
@@ -243,7 +243,7 @@ def GetBranchFeedback(request, feedback_id):
     try:
         branch = request.user.managed_branch
         feedback = Feedback.objects.select_related(
-            'customer', 'order'
+            'submitted_by', 'order'
         ).get(id = feedback_id, branch = branch)
     except Feedback.DoesNotExist:
         return Response({'error': 'Feedback not found'}, status = 404)
@@ -349,7 +349,7 @@ def ManagerSubmitFeedback(request):
 @permission_classes([IsAdmin])
 def AllFeedback(request):
     feedback = Feedback.objects.select_related(
-        'customer', 'branch', 'order'
+        'submitted_by', 'branch', 'order'
     ).order_by('-created_at')
 
     status_filter = request.query_params.get('status')
@@ -388,7 +388,7 @@ def AllFeedback(request):
 def GetFeedback(request, feedback_id):
     try:
         feedback = Feedback.objects.select_related(
-            'customer', 'branch', 'order'
+            'submitted_by', 'branch', 'order'
         ).get(id = feedback_id)
     except Feedback.DoesNotExist:
         return Response({'error': 'Feedback not found'}, status = 404)
