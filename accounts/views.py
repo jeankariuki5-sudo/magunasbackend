@@ -327,14 +327,16 @@ def MyProfile(request):
 @permission_classes([IsAuthenticated])
 def Logout(request):
     try:
-        refresh_token =  request.data.get("refresh")
+        refresh_token = request.data.get("refresh")
+        if not refresh_token:
+            return Response({'error': 'refresh token is required'}, status = 400)
         token = RefreshToken(refresh_token)
         token.blacklist()
-        return Response({"message" : "Logout successfull"})
+        return Response({"message": "Logout successfull"}, status = 200)
     except TokenError:
-        return Response({'error' : 'Invalid or expired token'})
+        return Response({'error': 'Invalid or expired token'}, status = 400)
     except Exception as e:
-        return Response({'error' : str(e)})
+        return Response({'error': str(e)}, status = 500)
     
     
 
@@ -778,23 +780,90 @@ def ResetPassword(request):
 
 
 
-# # ===================================================
-# # Delete User (admin only)
-# # ===================================================
-# @api_view(['DELETE'])
-# @permission_classes([IsAdmin])
-# def AdminDeleteUser(request, user_id):
-#     try:
-#         user = User.objects.get(id = user_id)
-#     except User.DoesNotExist:
-#         return Response({'error': 'User not found'}, status = 404)
+# ===================================================
+# Delete User (admin only)
+# ===================================================
+@api_view(['DELETE'])
+@permission_classes([IsAdmin])
+def AdminDeleteUser(request, user_id):
+    try:
+        user = User.objects.get(id = user_id)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status = 404)
 
-#     if user == request.user:
-#         return Response({'error': 'You cannot delete your own account'}, status = 400)
+    if user == request.user:
+        return Response({'error': 'You cannot delete your own account'}, status = 400)
 
-#     username = user.username
-#     user.delete()
-#     return Response({'message': f'{username} deleted successfully'}, status = 200)
+    username = user.username
+    user.delete()
+    return Response({'message': f'{username} deleted successfully'}, status = 200)
+
+
+# ===================================================
+# Update another user's details (admin only)
+# ===================================================
+@api_view(['PUT'])
+@permission_classes([IsAdmin])
+def AdminUpdateUser(request, user_id):
+    try:
+        user = User.objects.get(id = user_id)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status = 404)
+
+    new_email = request.data.get('email')
+    if new_email and User.objects.filter(email = new_email).exclude(id = user.id).exists():
+        return Response({'error': 'Email already registered to another account'}, status = 400)
+
+    new_phone = request.data.get('phone_number')
+    if new_phone and User.objects.filter(phone_number = new_phone, is_active = True).exclude(id = user.id).exists():
+        return Response({'error': 'Phone number already registered to another account'}, status = 400)
+
+    user.email = request.data.get('email', user.email)
+    user.phone_number = request.data.get('phone_number', user.phone_number)
+    user.save()
+
+    profile_data = {}
+
+    if user.is_customer() and hasattr(user, 'customer_profile'):
+        p = user.customer_profile
+        p.first_name = request.data.get('first_name', p.first_name)
+        p.last_name = request.data.get('last_name', p.last_name)
+        p.default_delivery_address = request.data.get('default_delivery_address', p.default_delivery_address)
+        p.save()
+        profile_data = {
+            'first_name': p.first_name,
+            'last_name': p.last_name,
+            'default_delivery_address': p.default_delivery_address,
+        }
+
+    elif user.is_branch_manager() and hasattr(user, 'manager_profile'):
+        p = user.manager_profile
+        p.first_name = request.data.get('first_name', p.first_name)
+        p.last_name = request.data.get('last_name', p.last_name)
+        # Unlike UpdateMyProfile (self-service), an admin is allowed to correct
+        # a mistyped national_id.
+        national_id = request.data.get('national_id')
+        if national_id and BranchManagerProfile.objects.filter(national_id = national_id).exclude(id = p.id).exists():
+            return Response({'error': 'National ID already registered to another account'}, status = 400)
+        p.national_id = national_id or p.national_id
+        p.save()
+        profile_data = {
+            'first_name': p.first_name,
+            'last_name': p.last_name,
+            'national_id': p.national_id,
+        }
+
+    return Response({
+        'message': 'User updated successfully',
+        'user': {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'phone_number': user.phone_number,
+            'role': user.role,
+        },
+        'profile': profile_data,
+    }, status = 200)
 
 
 # =========================================

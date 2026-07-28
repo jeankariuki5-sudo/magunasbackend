@@ -222,7 +222,7 @@ def BranchFeedback(request):
     for f in feedback:
         data.append({
             'id': f.id,
-            'customer': f.sumitted_by.username,
+            'customer': f.submitted_by.username,
             'title': f.title,
             'description': f.description,
             'feedback_type': f.feedback_type,
@@ -317,7 +317,7 @@ def ManagerSubmitFeedback(request):
         return Response({'error': 'You are not assigned to any branch'}, status = 404)
 
     feedback = Feedback.objects.create(
-        customer = request.user,
+        submitted_by = request.user,
         title = title,
         description = description,
         feedback_type = feedback_type,
