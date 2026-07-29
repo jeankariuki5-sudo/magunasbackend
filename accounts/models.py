@@ -44,6 +44,11 @@ class CustomerProfile(BaseModel):
     last_name = models.CharField(max_length=100)
     profile_picture = models.ImageField(upload_to='customer_profiles/', blank=True, null=True)
     default_delivery_address = models.TextField(blank=True)
+    # NEW: lets the frontend pin an exact delivery location on a map instead of
+    # relying on free-text address alone (used for delivery-fee/zone logic,
+    # and to autofill the map picker when a customer re-opens their profile).
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
 
     def __str__(self):
         return f"{self.first_name} {self.last_name} ({self.user.username})"

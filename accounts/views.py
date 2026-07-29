@@ -43,6 +43,8 @@ def CustomerRegister(request):
     first_name = request.data.get('first_name')
     last_name = request.data.get('last_name')
     default_delivery_address = request.data.get('default_delivery_address', '')
+    latitude = request.data.get('latitude') or None
+    longitude = request.data.get('longitude') or None
 
     if getattr(request, 'limited', False):
         return RateLimitedResponse()
@@ -78,8 +80,13 @@ def CustomerRegister(request):
             user = user,
             first_name = first_name,
             last_name = last_name,
-            default_delivery_address = default_delivery_address
+            default_delivery_address = default_delivery_address,
+            latitude = latitude,
+            longitude = longitude,
         )
+        if 'profile_picture' in request.FILES:
+            profile.profile_picture = request.FILES['profile_picture']
+            profile.save()
 
         refresh = RefreshToken.for_user(user)
 
@@ -261,6 +268,9 @@ def CreateBranchManager(request):
             last_name = last_name,
             national_id = national_id,
         )
+        if 'profile_picture' in request.FILES:
+            profile.profile_picture = request.FILES['profile_picture']
+            profile.save()
 
         return Response({
             'message': 'Branch manager account created successfully',
@@ -300,6 +310,9 @@ def MyProfile(request):
             'first_name': p.first_name,
             'last_name': p.last_name,
             'default_delivery_address': p.default_delivery_address,
+            'latitude': str(p.latitude) if p.latitude is not None else None,
+            'longitude': str(p.longitude) if p.longitude is not None else None,
+            'profile_picture': request.build_absolute_uri(p.profile_picture.url) if p.profile_picture else None,
         }
     elif user.is_branch_manager() and hasattr(user, 'manager_profile'):
         p = user.manager_profile
@@ -307,6 +320,7 @@ def MyProfile(request):
             'first_name': p.first_name,
             'last_name': p.last_name,
             'national_id': p.national_id,
+            'profile_picture': request.build_absolute_uri(p.profile_picture.url) if p.profile_picture else None,
         }
 
     return Response({
@@ -455,6 +469,8 @@ def UpdateMyProfile(request):
         p.first_name = request.data.get('first_name', p.first_name)
         p.last_name = request.data.get('last_name', p.last_name)
         p.default_delivery_address = request.data.get('default_delivery_address', p.default_delivery_address)
+        p.latitude = request.data.get('latitude', p.latitude) or None
+        p.longitude = request.data.get('longitude', p.longitude) or None
         if 'profile_picture' in request.FILES:
             p.profile_picture = request.FILES['profile_picture']
         p.save()
@@ -479,6 +495,9 @@ def UpdateMyProfile(request):
                 'first_name': p.first_name,
                 'last_name': p.last_name,
                 'default_delivery_address': p.default_delivery_address,
+                'latitude': str(p.latitude) if p.latitude is not None else None,
+                'longitude': str(p.longitude) if p.longitude is not None else None,
+                'profile_picture': request.build_absolute_uri(p.profile_picture.url) if p.profile_picture else None,
             }
         }, status=200)
 
@@ -510,6 +529,7 @@ def UpdateMyProfile(request):
                 'first_name': p.first_name,
                 'last_name': p.last_name,
                 'national_id': p.national_id,  # national ID not editable
+                'profile_picture': request.build_absolute_uri(p.profile_picture.url) if p.profile_picture else None,
             }
         }, status=200)
 

@@ -29,7 +29,11 @@ class DeliveryZone(models.Model):
     zone_name = models.CharField(max_length=100)
     delivery_fee = models.DecimalField(max_digits=10, decimal_places=2)
     is_active = models.BooleanField(default=True)
+    # NEW: optional center point for this zone, set via the map picker on the
+    # frontend. Nullable since existing zones (and admins who don't care to
+    # pin one) shouldn't be forced to have coordinates.
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
 
     def __str__(self):
         return f"{self.zone_name} - {self.branch.branch_name}"
-    

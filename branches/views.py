@@ -18,7 +18,20 @@ User = get_user_model()
 @api_view(['GET'])
 @permission_classes([])
 def ListBranches(request):
-    branches = Branch.objects.filter(is_active=True)
+    # Public callers (customers) always get active-only. Admins can pass
+    # ?include_inactive=true to see everything - e.g. to find and reactivate
+    # a branch that was previously deactivated, since that was otherwise
+    # impossible (no other endpoint lists inactive branches at all).
+    show_inactive = request.query_params.get('include_inactive') == 'true'
+    is_admin_user = request.user.is_authenticated and (
+        getattr(request.user, 'role', None) == 'admin' or request.user.is_superuser
+    )
+
+    if show_inactive and is_admin_user:
+        branches = Branch.objects.all()
+    else:
+        branches = Branch.objects.filter(is_active=True)
+
     data = []
     for branch in branches:
         data.append({
@@ -28,6 +41,7 @@ def ListBranches(request):
             'phone_number': branch.phone_number,
             'latitude': str(branch.latitude),
             'longitude': str(branch.longitude),
+            'is_active': branch.is_active,
             'branch_manager': branch.branch_manager.username if branch.branch_manager else None,
         })
     return Response(data, status=200)
@@ -70,7 +84,6 @@ def CreateBranch(request):
             longitude=longitude,
             branch_manager=manager
         )
-
         return Response({
             'message': 'Branch created successfully',
             'branch': {
@@ -293,6 +306,8 @@ def ListDeliveryZones(request, branch_id):
             'zone_name': zone.zone_name,
             'delivery_fee': str(zone.delivery_fee),
             'is_active': zone.is_active,
+            'latitude': str(zone.latitude) if zone.latitude is not None else None,
+            'longitude': str(zone.longitude) if zone.longitude is not None else None,
         })
 
     return Response({
@@ -308,6 +323,8 @@ def ListDeliveryZones(request, branch_id):
 def CreateDeliveryZone(request):
     zone_name = request.data.get('zone_name')
     delivery_fee = request.data.get('delivery_fee')
+    latitude = request.data.get('latitude') or None
+    longitude = request.data.get('longitude') or None
 
     if not zone_name or not delivery_fee:
         return Response({'error': 'zone_name and delivery_fee are required'}, status = 400)
@@ -340,7 +357,9 @@ def CreateDeliveryZone(request):
     zone = DeliveryZone.objects.create(
         branch = branch,
         zone_name = zone_name,
-        delivery_fee = delivery_fee
+        delivery_fee = delivery_fee,
+        latitude = latitude,
+        longitude = longitude,
     )
 
     return Response({
@@ -351,6 +370,8 @@ def CreateDeliveryZone(request):
             'zone_name': zone.zone_name,
             'delivery_fee': str(zone.delivery_fee),
             'is_active': zone.is_active,
+            'latitude': str(zone.latitude) if zone.latitude is not None else None,
+            'longitude': str(zone.longitude) if zone.longitude is not None else None,
         }
     }, status = 201)
 
@@ -388,6 +409,8 @@ def UpdateDeliveryZone(request, zone_id):
     zone.zone_name = new_zone_name or zone.zone_name
     zone.delivery_fee = request.data.get('delivery_fee', zone.delivery_fee)
     zone.is_active = request.data.get('is_active', zone.is_active)
+    zone.latitude = request.data.get('latitude', zone.latitude) or None
+    zone.longitude = request.data.get('longitude', zone.longitude) or None
     zone.save()
 
     return Response({
@@ -398,6 +421,8 @@ def UpdateDeliveryZone(request, zone_id):
             'zone_name': zone.zone_name,
             'delivery_fee': str(zone.delivery_fee),
             'is_active': zone.is_active,
+            'latitude': str(zone.latitude) if zone.latitude is not None else None,
+            'longitude': str(zone.longitude) if zone.longitude is not None else None,
         }
     }, status = 200)
 
@@ -445,6 +470,8 @@ def MyBranchDeliveryZones(request):
             'zone_name': zone.zone_name,
             'delivery_fee': str(zone.delivery_fee),
             'is_active': zone.is_active,
+            'latitude': str(zone.latitude) if zone.latitude is not None else None,
+            'longitude': str(zone.longitude) if zone.longitude is not None else None,
         })
 
     return Response({
