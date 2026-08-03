@@ -1123,11 +1123,19 @@ def CheckAvailability(request):
 
     username = request.query_params.get('username')
     email = request.query_params.get('email')
+    phone_number = request.query_params.get('phone_number')
 
     data = {}
     if username:
         data['username_available'] = not User.objects.filter(username__iexact = username).exists()
     if email:
         data['email_available'] = not User.objects.filter(email__iexact = email).exists()
+    if phone_number:
+        # Matches CustomerRegister's own check exactly (is_active=True only) -
+        # a suspended account's old phone number is treated as free to reuse,
+        # same as it is at actual registration time.
+        data['phone_number_available'] = not User.objects.filter(
+            phone_number = phone_number, is_active = True
+        ).exists()
 
     return Response(data, status = 200)
