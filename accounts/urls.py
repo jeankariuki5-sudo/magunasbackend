@@ -8,6 +8,7 @@ urlpatterns = [
     # User auth
     path('token/refresh/', TokenRefreshView.as_view(), name = 'token-refresh'),
     path('auth/customer_register/',views.CustomerRegister ),
+    path('auth/check_availability/', views.CheckAvailability),
     path('auth/login/', views.Login),
     path('auth/logout/', views.Logout),
     path('auth/change_password/', views.ChangePassword),
@@ -26,7 +27,7 @@ urlpatterns = [
     path('auth/list_users/', views.ListUsers),
     path('auth/get_user/<int:user_id>/', views.GetUser),
     path('auth/update_user/<int:user_id>/', views.AdminUpdateUser),
-    path('auth/delete_user/<int:user_id>/', views.AdminDeleteUser),
+    # path('auth/delete_user/<int:user_id>/', views.AdminDeleteUser),
     path('auth/suspend_user/<int:user_id>/', views.SuspendUser),
     path('auth/unsuspend_user/<int:user_id>/', views.UnsuspendUser),
     path('auth/suspension_status/<int:user_id>/', views.SuspensionStatus),
@@ -45,5 +46,6 @@ urlpatterns = [
     # user acticity
     path('users/activity/', views.AllActivity),
     path('users/activity/failed_logins/', views.FailedLogins),
+    path('users/flagged/', views.FlaggedAccounts),
     path('users/activity/<int:user_id>/', views.UserActivity),
 ]

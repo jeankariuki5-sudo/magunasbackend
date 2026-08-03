@@ -1,4 +1,5 @@
 from django.utils import timezone
+from datetime import timedelta
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db import IntegrityError, models, transaction
@@ -146,6 +147,17 @@ def Login(request):
                 suspended_user.is_active = True
                 suspended_user.save()
             else:
+                # FIX: attempts against a still-suspended account previously
+                # returned here with no trail at all - meaning repeated brute
+                # force attempts on a suspended account were invisible in the
+                # activity log. Now logged the same way any other failed
+                # attempt is.
+                ActivityLog.objects.create(
+                    user = suspended_user,
+                    action = 'login_failed',
+                    ip_address = ip,
+                    detail = f'Login attempt on suspended account: {username}'
+                )
                 return Response({
                     'error': 'Your account has been suspended.',
                     'suspension_type': suspension.suspension_type,
@@ -153,6 +165,12 @@ def Login(request):
                     'lift_at': suspension.lift_at,
                 }, status = 403)
         else:
+            ActivityLog.objects.create(
+                user = suspended_user,
+                action = 'login_failed',
+                ip_address = ip,
+                detail = f'Login attempt on permanently suspended account: {username}'
+            )
             return Response({
                 'error': 'Your account has been permanently suspended.',
                 'reason': suspension.reason,
@@ -939,10 +957,15 @@ def UserActivity(request, user_id):
     # Summary counts
     summary = {
         'total_logins': logs.filter(action = 'login_success').count(),
-        'failed_logins': ActivityLog.objects.filter(
-            ip_address__in = logs.values_list('ip_address', flat = True),
-            action = 'login_failed'
-        ).count(),
+        # FIX: this used to cross-reference by IP address instead of filtering
+        # directly on this user - meaning failed attempts from a new/different
+        # IP than any of this user's other logged activity were silently
+        # excluded, and conversely a shared IP (same network, NAT, etc.) could
+        # pull in *other* accounts' failed attempts as if they were this
+        # user's. login_failed entries are already correctly tied to this
+        # exact user via the `user` field set in the Login view, so just
+        # filter on that directly.
+        'failed_logins': logs.filter(action = 'login_failed').count(),
         'orders_placed': logs.filter(action = 'order_placed').count(),
         'orders_cancelled': logs.filter(action = 'order_cancelled').count(),
         'feedback_submitted': logs.filter(action = 'feedback_submitted').count(),
@@ -1002,5 +1025,109 @@ def AllActivity(request):
             'detail': log.detail,
             'created_at': log.created_at,
         })
+
+    return Response(data, status = 200)
+
+# ======================================================
+# Flagged accounts - surfaces suspicious activity automatically
+# instead of requiring the admin to trawl AllActivity/FailedLogins by hand.
+# Thresholds below are conservative starting points - tune them once you
+# have real traffic to calibrate against.
+# ======================================================
+@api_view(['GET'])
+@permission_classes([IsAdmin])
+def FlaggedAccounts(request):
+    now = timezone.now()
+    window_1h = now - timedelta(hours = 1)
+    window_24h = now - timedelta(hours = 24)
+
+    flags = {}  # user_id -> {'reasons': [str]}
+
+    def flag(user_id, reason):
+        entry = flags.setdefault(user_id, {'reasons': []})
+        entry['reasons'].append(reason)
+
+    # Heuristic 1: 5+ failed logins on one account within the last hour -
+    # classic brute-force / credential-stuffing pattern.
+    recent_failed = (
+        ActivityLog.objects
+        .filter(action = 'login_failed', created_at__gte = window_1h, user__isnull = False)
+        .values('user')
+        .annotate(count = db_models.Count('id'))
+        .filter(count__gte = 5)
+    )
+    for row in recent_failed:
+        flag(row['user'], f"{row['count']} failed login attempts in the last hour")
+
+    # Heuristic 2: any attempt against an already-suspended account in the
+    # last 24h - someone still trying a locked account's password. Only
+    # detectable now that suspended-account attempts are actually logged
+    # (see the Login view fix).
+    suspended_attempts = (
+        ActivityLog.objects
+        .filter(action = 'login_failed', created_at__gte = window_24h, user__isnull = False, user__is_active = False)
+        .values('user')
+        .annotate(count = db_models.Count('id'))
+    )
+    for row in suspended_attempts:
+        flag(row['user'], f"{row['count']} login attempt(s) on their suspended account in the last 24h")
+
+    # Heuristic 3: unusually high order cancellations - possible fraud/abuse
+    # pattern (e.g. placing and cancelling repeatedly to probe stock/pricing).
+    cancellations = (
+        ActivityLog.objects
+        .filter(action = 'order_cancelled', created_at__gte = window_24h, user__isnull = False)
+        .values('user')
+        .annotate(count = db_models.Count('id'))
+        .filter(count__gte = 5)
+    )
+    for row in cancellations:
+        flag(row['user'], f"{row['count']} order cancellations in the last 24h")
+
+    if not flags:
+        return Response([], status = 200)
+
+    users = User.objects.in_bulk(flags.keys())
+    data = []
+    for user_id, entry in flags.items():
+        user = users.get(user_id)
+        if not user:
+            continue
+        data.append({
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'role': user.role,
+            'is_active': user.is_active,
+            'reasons': entry['reasons'],
+        })
+
+    # Most-flagged-reasons first
+    data.sort(key = lambda d: len(d['reasons']), reverse = True)
+
+    return Response(data, status = 200)
+
+
+# ========================================
+# Check username/email availability - lets the frontend validate live,
+# before the person ever submits the registration form. Rate-limited by IP
+# since without that, this endpoint doubles as a way to enumerate every
+# existing username/email on the platform.
+# ========================================
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@ratelimit(key = 'ip', rate = '30/m', block = False)
+def CheckAvailability(request):
+    if getattr(request, 'limited', False):
+        return Response({'error': 'Too many requests. Please slow down.'}, status = 429)
+
+    username = request.query_params.get('username')
+    email = request.query_params.get('email')
+
+    data = {}
+    if username:
+        data['username_available'] = not User.objects.filter(username__iexact = username).exists()
+    if email:
+        data['email_available'] = not User.objects.filter(email__iexact = email).exists()
 
     return Response(data, status = 200)
