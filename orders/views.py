@@ -477,8 +477,10 @@ def CancelOrder(request, order_id):
     if order.status == 'cancelled':
         return Response({'error': 'Order is already cancelled'}, status = 400)
 
-    if order.status == 'completed':
-        return Response({'error': 'Completed orders cannot be cancelled'}, status = 400)
+    # FIXED: was 'completed', which isn't a valid Order.STATUS_CHOICES value.
+    # The model's terminal delivery state is 'delivered'.
+    if order.status == 'delivered':
+        return Response({'error': 'Delivered orders cannot be cancelled'}, status = 400)
     
     # Prevent cancellation if payment was successful
     if hasattr(order, 'payment') and order.payment.status == 'success':
@@ -578,7 +580,8 @@ def UpdateOrderStatus(request, order_id):
     if not new_status:
         return Response({'error': 'status is required'}, status = 400)
 
-    valid_statuses = ['placed', 'packed', 'out_for_delivery', 'ready_for_pickup', 'completed', 'cancelled']
+    # FIXED: was 'completed', which isn't a valid Order.STATUS_CHOICES value.
+    valid_statuses = ['placed', 'packed', 'out_for_delivery', 'ready_for_pickup', 'delivered', 'cancelled']
     if new_status not in valid_statuses:
         return Response({
             'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
@@ -599,8 +602,9 @@ def UpdateOrderStatus(request, order_id):
         if order.branch != branch:
             return Response({'error': 'You can only update orders from your own branch'}, status = 403)
 
-    if order.status == 'completed':
-        return Response({'error': 'Completed orders cannot be updated'}, status = 400)
+    # FIXED: was checking 'completed'; the real terminal state is 'delivered'.
+    if order.status == 'delivered':
+        return Response({'error': 'Delivered orders cannot be updated'}, status = 400)
 
     if order.status == 'cancelled':
         return Response({'error': 'Cancelled orders cannot be updated'}, status = 400)

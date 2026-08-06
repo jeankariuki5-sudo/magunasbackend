@@ -13,13 +13,13 @@ urlpatterns = [
     # Orders
     path('place_order/', views.PlaceOrder),
     path('get_my_order/<int:order_id>/', views.GetMyOrder),
-    path('cancel_order/', views.CancelOrder),
+    path('cancel_order/<int:order_id>/', views.CancelOrder),
     path('my_orders/', views.MyOrders),
 
-    # Brach manager order
+    # Branch manager order
     path('branch_orders/', views.BranchOrders),
-    path('update_order_status/', views.UpdateOrderStatus),
-    path('get_order/', views.GetOrder),
+    path('update_order_status/<int:order_id>/', views.UpdateOrderStatus),
+    path('get_order/<int:order_id>/', views.GetOrder),
     path('all_orders/', views.AllOrders),
 
 ]
