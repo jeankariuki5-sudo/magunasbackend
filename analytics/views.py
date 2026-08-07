@@ -24,7 +24,10 @@ def RevenuePerBranch(request):
     start_date = request.query_params.get('start_date')
     end_date = request.query_params.get('end_date')
 
-    orders = Order.objects.filter(status = 'completed')
+    # FIXED: was 'completed', which isn't a valid Order.STATUS_CHOICES value -
+    # this meant every branch always reported zero revenue. The model's
+    # terminal delivery state is 'delivered'.
+    orders = Order.objects.filter(status = 'delivered')
 
     if start_date:
         orders = orders.filter(created_at__date__gte = start_date)
@@ -76,8 +79,9 @@ def TopSellingProducts(request):
     start_date = request.query_params.get('start_date')
     end_date = request.query_params.get('end_date')
 
+    # FIXED: was 'completed'
     order_items = OrderItem.objects.filter(
-        order__status = 'completed'
+        order__status = 'delivered'
     ).select_related('branch_product__product')
 
     if start_date:
@@ -160,7 +164,8 @@ def OrdersByDate(request):
             }
 
         grouped[key]['total_orders'] += 1
-        if order.status == 'completed':
+        # FIXED: was checking order.status == 'completed'
+        if order.status == 'delivered':
             grouped[key]['completed_orders'] += 1
             grouped[key]['total_revenue'] += float(order.total_amount)
         if order.status == 'cancelled':
@@ -203,7 +208,8 @@ def BranchRevenue(request):
     month_start = today.replace(day = 1)
     week_start = today - timedelta(days = 7)
 
-    orders = Order.objects.filter(branch = branch, status = 'completed')
+    # FIXED: was 'completed' throughout this view
+    orders = Order.objects.filter(branch = branch, status = 'delivered')
 
     if start_date:
         orders = orders.filter(created_at__date__gte = start_date)
@@ -216,24 +222,24 @@ def BranchRevenue(request):
 
     today_revenue = Order.objects.filter(
         branch = branch,
-        status = 'completed',
+        status = 'delivered',
         created_at__date = today
     ).aggregate(total = Sum('total_amount'))['total'] or 0
 
     weekly_revenue = Order.objects.filter(
         branch = branch,
-        status = 'completed',
+        status = 'delivered',
         created_at__date__gte = week_start
     ).aggregate(total = Sum('total_amount'))['total'] or 0
 
     monthly_revenue = Order.objects.filter(
         branch = branch,
-        status = 'completed',
+        status = 'delivered',
         created_at__date__gte = month_start
     ).aggregate(total = Sum('total_amount'))['total'] or 0
 
     total_orders = Order.objects.filter(branch = branch).count()
-    completed_orders = Order.objects.filter(branch = branch, status = 'completed').count()
+    completed_orders = Order.objects.filter(branch = branch, status = 'delivered').count()
     cancelled_orders = Order.objects.filter(branch = branch, status = 'cancelled').count()
     pending_orders = Order.objects.filter(branch = branch, status = 'placed').count()
 
@@ -271,9 +277,10 @@ def BranchTopProducts(request):
     start_date = request.query_params.get('start_date')
     end_date = request.query_params.get('end_date')
 
+    # FIXED: was 'completed'
     order_items = OrderItem.objects.filter(
         order__branch = branch,
-        order__status = 'completed'
+        order__status = 'delivered'
     ).select_related('branch_product__product')
 
     if start_date:

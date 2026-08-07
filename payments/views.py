@@ -44,8 +44,10 @@ def InitiatePayment(request, order_id):
     if order.status == 'cancelled':
         return Response({'error': 'Cannot pay for a cancelled order'}, status = 400)
 
-    if order.status == 'completed':
-        return Response({'error': 'Order is already paid and completed'}, status = 400)
+    # FIXED: was 'completed', which isn't a valid Order.STATUS_CHOICES value.
+    # The model's terminal delivery state is 'delivered'.
+    if order.status == 'delivered':
+        return Response({'error': 'Order is already delivered'}, status = 400)
     
     # Confirm amount matches order total
     if float(request.data.get('amount', order.total_amount)) != float(order.total_amount):
