@@ -9,6 +9,7 @@ from django_ratelimit.exceptions import Ratelimited
 
 from accounts.permissions import IsCustomer
 from orders.models import Order
+from loyalty.utils import AwardPoints
 from .models import Payment
 from .mpesa import InitiateSTKPush
 
@@ -144,6 +145,11 @@ def MpesaCallback(request):
             # Update order status
             payment.order.status = 'packed'
             payment.order.save()
+
+            # Award loyalty points based on what was actually paid via M-Pesa
+            # (payment.amount already excludes any points-redemption discount,
+            # so a customer can't earn points on money they paid with points).
+            AwardPoints(payment.order.customer, payment.amount, order = payment.order)
 
         else:
             # Payment failed or cancelled

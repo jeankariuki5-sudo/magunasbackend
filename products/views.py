@@ -7,6 +7,7 @@ from django.utils.text import slugify
 
 from accounts.permissions import IsAdmin, IsBranchManager, IsAdminOrBranchManager
 from branches.models import Branch
+from loyalty.utils import GetEffectivePrice
 from .models import Category, Product, BranchProduct
 # Create your views here.
 
@@ -327,6 +328,7 @@ def ListBranchProducts(request, branch_id):
 
     data = []
     for item in queryset:
+        effective_price = GetEffectivePrice(item)
         data.append({
             'id': item.id,
             'product_id': item.product.id,
@@ -334,7 +336,9 @@ def ListBranchProducts(request, branch_id):
             'description': item.product.description,
             'category': item.product.category.category_name,
             'image': request.build_absolute_uri(item.product.image.url) if item.product.image else None,
-            'price': str(item.price),
+            'price': str(effective_price),
+            'original_price': str(item.price),
+            'on_promotion': effective_price != item.price,
             'stock_quantity': item.stock_quantity,
             'is_available': item.is_available,
             'in_stock': item.in_stock,
@@ -493,12 +497,15 @@ def MyBranchProducts(request):
 
     data = []
     for item in queryset:
+        effective_price = GetEffectivePrice(item)
         data.append({
             'id': item.id,
             'product_name': item.product.product_name,
             'category': item.product.category.category_name,
             'image': request.build_absolute_uri(item.product.image.url) if item.product.image else None,
             'price': str(item.price),
+            'effective_price': str(effective_price),
+            'on_promotion': effective_price != item.price,
             'stock_quantity': item.stock_quantity,
             'is_available': item.is_available,
             'in_stock': item.in_stock,

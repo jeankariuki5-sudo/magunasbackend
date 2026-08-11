@@ -12,6 +12,7 @@ from django.http import JsonResponse
 from accounts.permissions import IsAdmin, IsBranchManager, IsCustomer, IsAdminOrBranchManager
 from branches.models import Branch, DeliveryZone
 from products.models import BranchProduct
+from loyalty.utils import GetEffectivePrice, RedeemPoints, ReverseRedeemedPoints
 from .models import Cart, CartItem, Order, OrderItem
 
 def Handler403(request, exception = None):
@@ -52,19 +53,26 @@ def ViewCart(request):
     )
 
     items_data = []
+    cart_total = 0
     for item in items:
+        # Use the effective (promotion-aware) price rather than the raw
+        # branch_product.price, so the cart reflects any active promotion.
+        effective_price = GetEffectivePrice(item.branch_product)
+        item_subtotal = effective_price * item.quantity
+        cart_total += item_subtotal
+
         items_data.append({
             'id': item.id,
             'branch_product_id': item.branch_product.id,
             'product_name': item.branch_product.product.product_name,
-            'price': str(item.branch_product.price),
+            'price': str(effective_price),
+            'original_price': str(item.branch_product.price),
+            'on_promotion': effective_price != item.branch_product.price,
             'quantity': item.quantity,
-            'subtotal': str(item.subtotal),
+            'subtotal': str(item_subtotal),
             'in_stock': item.branch_product.in_stock,
             'stock_quantity': item.branch_product.stock_quantity,
         })
-
-    cart_total = sum(item.subtotal for item in items)
 
     return Response({
         'cart_id': cart.id,
@@ -163,9 +171,9 @@ def AddToCart(request):
         'item': {
             'id': cart_item.id,
             'product_name': branch_product.product.product_name,
-            'price': str(branch_product.price),
+            'price': str(GetEffectivePrice(branch_product)),
             'quantity': cart_item.quantity,
-            'subtotal': str(cart_item.subtotal),
+            'subtotal': str(GetEffectivePrice(branch_product) * cart_item.quantity),
         }
     }, status = 200)
 
@@ -211,7 +219,7 @@ def UpdateCartItem(request, cart_item_id):
             'id': cart_item.id,
             'product_name': cart_item.branch_product.product.product_name,
             'quantity': cart_item.quantity,
-            'subtotal': str(cart_item.subtotal),
+            'subtotal': str(GetEffectivePrice(cart_item.branch_product) * cart_item.quantity),
         }
     }, status = 200)
 
@@ -270,6 +278,7 @@ def PlaceOrder(request):
     fulfillment_type = request.data.get('fulfillment_type')  # delivery or pickup
     delivery_address = request.data.get('delivery_address', '')
     delivery_zone_id = request.data.get('delivery_zone_id')
+    points_to_redeem = int(request.data.get('points_to_redeem', 0) or 0)
 
     if getattr(request, 'limited', False):
         return Response({'error': 'Too many requests. Please slow down.'}, status = 429)
@@ -285,6 +294,9 @@ def PlaceOrder(request):
 
     if fulfillment_type == 'delivery' and not delivery_zone_id:
         return Response({'error': 'delivery_zone_id is required for delivery orders'}, status = 400)
+
+    if points_to_redeem < 0:
+        return Response({'error': 'points_to_redeem cannot be negative'}, status = 400)
 
     # Get cart
     try:
@@ -312,7 +324,7 @@ def PlaceOrder(request):
         except DeliveryZone.DoesNotExist:
             return Response({'error': 'Invalid or inactive delivery zone for this branch'}, status = 404)
 
-    # Validate stock and calculate total
+    # Validate stock and calculate total using the effective (promotion-aware) price
     items_total = 0
     for item in cart_items:
         bp = item.branch_product
@@ -321,9 +333,30 @@ def PlaceOrder(request):
                 'error': f'Not enough stock for {bp.product.product_name}. '
                          f'Only {bp.stock_quantity} available.'
             }, status = 400)
-        items_total += bp.price * item.quantity
+        items_total += GetEffectivePrice(bp) * item.quantity
 
-    total_amount = items_total + delivery_fee
+    pre_discount_total = items_total + delivery_fee
+
+    # Validate points redemption before creating anything
+    if points_to_redeem > 0:
+        try:
+            account = request.user.loyalty_account
+            available_points = account.points_balance
+        except Exception:
+            available_points = 0
+
+        if points_to_redeem > available_points:
+            return Response({
+                'error': f'You only have {available_points} points available.'
+            }, status = 400)
+
+        if points_to_redeem > pre_discount_total:
+            return Response({
+                'error': 'points_to_redeem cannot exceed the order total.'
+            }, status = 400)
+
+    points_discount = points_to_redeem  # 1 point = KES 1
+    total_amount = pre_discount_total - points_discount
 
     # Create order
     order = Order.objects.create(
@@ -344,18 +377,30 @@ def PlaceOrder(request):
         detail = f'Order #{order.id} placed at {order.branch.branch_name}'
     )
 
-    # Create order items and decrement stock atomically
+    # Create order items and decrement stock atomically.
+    # unit_price snapshots the effective price at order time - if the
+    # promotion ends or the base price changes later, this order's record
+    # is unaffected.
     for item in cart_items:
         bp = item.branch_product
         OrderItem.objects.create(
             order = order,
             branch_product = bp,
             quantity = item.quantity,
-            unit_price = bp.price  # snapshot price at time of order
+            unit_price = GetEffectivePrice(bp)
         )
         # Decrement stock
         bp.stock_quantity -= item.quantity
         bp.save()
+
+    # Apply the points redemption now that the order exists to link it to
+    if points_to_redeem > 0:
+        try:
+            RedeemPoints(request.user, points_to_redeem, order = order)
+        except ValueError:
+            # Shouldn't happen since we validated above, but don't let a
+            # race condition leave the order in a broken state.
+            pass
 
     # Clear cart after order placed
     cart.items.all().delete()
@@ -370,6 +415,8 @@ def PlaceOrder(request):
             'delivery_address': order.delivery_address,
             'delivery_zone': delivery_zone.zone_name if delivery_zone else None,
             'delivery_fee': str(order.delivery_fee),
+            'points_redeemed': points_to_redeem,
+            'points_discount': str(points_discount),
             'total_amount': str(order.total_amount),
             'status': order.status,
             'created_at': order.created_at,
@@ -498,6 +545,9 @@ def CancelOrder(request, order_id):
 
     order.status = 'cancelled'
     order.save()
+
+    # Refund any points that were redeemed against this order
+    ReverseRedeemedPoints(order)
 
     ActivityLog.objects.create(
         user = request.user,
