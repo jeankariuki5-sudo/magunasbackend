@@ -7,6 +7,9 @@ urlpatterns = [
     path('my_account/', views.MyLoyaltyAccount),
     path('my_transactions/', views.MyLoyaltyTransactions),
 
+    # Staff - check a customer's balance on their behalf
+    path('customer_account/', views.CustomerLoyaltyAccount),
+
     # Promotions - admin / branch manager
     path('promotions/create/', views.CreatePromotion),
     path('promotions/list/', views.ListPromotions),

@@ -1,9 +1,10 @@
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from accounts.permissions import IsCustomer, IsAdminOrBranchManager
+from accounts.permissions import IsAdminOrBranchManager
+from accounts.models import User
 from products.models import BranchProduct
 from .models import LoyaltyAccount, Promotion
 
@@ -13,7 +14,7 @@ from .models import LoyaltyAccount, Promotion
 # ======================================================
 
 @api_view(['GET'])
-@permission_classes([IsCustomer])
+@permission_classes([IsAuthenticated])
 def MyLoyaltyAccount(request):
     account, _ = LoyaltyAccount.objects.get_or_create(customer = request.user)
     return Response({
@@ -24,7 +25,7 @@ def MyLoyaltyAccount(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsCustomer])
+@permission_classes([IsAuthenticated])
 def MyLoyaltyTransactions(request):
     account, _ = LoyaltyAccount.objects.get_or_create(customer = request.user)
     transactions = account.transactions.all()[:50]
@@ -38,6 +39,46 @@ def MyLoyaltyTransactions(request):
     } for t in transactions]
 
     return Response(data, status = 200)
+
+
+# ======================================================
+# STAFF - LOOK UP A CUSTOMER'S LOYALTY BALANCE
+# ======================================================
+
+@api_view(['GET'])
+@permission_classes([IsAdminOrBranchManager])
+def CustomerLoyaltyAccount(request):
+    """
+    Lets an admin or branch manager check a customer's points balance on the
+    customer's behalf (e.g. at the till). Points are global (not tied to any
+    branch), so this works the same regardless of which branch is asking.
+
+    Accepts either ?customer_id=<id> or ?phone=<phone_number> - staff at a
+    counter usually only have the phone number on hand.
+    """
+    customer_id = request.query_params.get('customer_id')
+    phone = request.query_params.get('phone')
+
+    if not customer_id and not phone:
+        return Response({'error': 'customer_id or phone is required'}, status = 400)
+
+    lookup = {'id': customer_id} if customer_id else {'phone_number': phone}
+
+    try:
+        customer = User.objects.get(role = 'customer', **lookup)
+    except User.DoesNotExist:
+        return Response({'error': 'Customer not found'}, status = 404)
+
+    account, _ = LoyaltyAccount.objects.get_or_create(customer = customer)
+
+    return Response({
+        'customer_id': customer.id,
+        'username': customer.username,
+        'phone_number': customer.phone_number,
+        'points_balance': account.points_balance,
+        'points_value_kes': account.points_balance,  # 1 point = KES 1 when redeemed
+        'lifetime_points_earned': account.lifetime_points_earned,
+    }, status = 200)
 
 
 # ======================================================
