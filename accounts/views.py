@@ -131,11 +131,17 @@ def Login(request):
     if not username or not password:
         return Response({'error': 'Username and password are required'}, status = 400)
 
-    # Check if username or email belongs to a suspended account
-    suspended_user = User.objects.filter(
-        db_models.Q(username = username) | db_models.Q(email = username),
-        is_active = False
+    # Let people log in with either their username or their email. Resolve
+    # to the actual account up front - authenticate() only ever checks
+    # USERNAME_FIELD (username), so without this an email would silently
+    # never match even with the correct password.
+    matched_user = User.objects.filter(
+        db_models.Q(username = username) | db_models.Q(email__iexact = username)
     ).first()
+    login_username = matched_user.username if matched_user else username
+
+    # Check if username or email belongs to a suspended account
+    suspended_user = matched_user if matched_user and not matched_user.is_active else None
 
     if suspended_user and hasattr(suspended_user, 'suspension'):
         suspension = suspended_user.suspension
@@ -176,18 +182,13 @@ def Login(request):
                 'reason': suspension.reason,
             }, status = 403)
 
-    user = authenticate(username = username, password = password)
+    user = authenticate(username = login_username, password = password)
 
     if not user:
-        # Try to find the account being targeted
-        # Links log to real account if username exists, None if it doesn't
-        targeted_user = User.objects.filter(
-            db_models.Q(username = username) | db_models.Q(email = username)
-        ).first()
-
-        # Log failed login attempt
+        # Log failed login attempt - matched_user links it to the real
+        # account if the identifier resolved to one, None otherwise.
         ActivityLog.objects.create(
-            user = targeted_user,
+            user = matched_user,
             action = 'login_failed',
             ip_address = ip,
             detail = f'Failed login attempt for username: {username}'

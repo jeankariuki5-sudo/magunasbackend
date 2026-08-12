@@ -21,6 +21,10 @@ class User(BaseModel, AbstractUser):
     ]
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='customer')
     phone_number = models.CharField(max_length=15, blank=True, unique=True)
+    # Every signup path (customer register, admin-created branch manager) already
+    # requires and uniqueness-checks email in the view layer - this makes that a
+    # real DB constraint too, so login-by-email can never resolve ambiguously.
+    email = models.EmailField('email address', unique=True)
 
     def is_admin(self):
         return self.role == 'admin'
