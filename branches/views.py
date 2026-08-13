@@ -4,10 +4,10 @@ from django.db import IntegrityError
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from .haversine import CalculateDistance
+from .haversine import CalculateDistance, CalculateDeliveryFee
 
 from accounts.permissions import IsAdmin, IsAdminOrBranchManager, IsBranchManager
-from .models import Branch, DeliveryZone
+from .models import Branch
 
 User = get_user_model()
 
@@ -309,203 +309,46 @@ def MyBranch(request):
 
 
 # ══════════════════════════════════════════════════════
-# DELIVERY ZONE VIEWS
+# DELIVERY FEE ESTIMATE
 # ══════════════════════════════════════════════════════
 
-# ─── LIST DELIVERY ZONES FOR A BRANCH (public) ────────────────────────────────
+# ─── ESTIMATE DELIVERY FEE (public) ────────────────────────────────────────────
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
-def ListDeliveryZones(request, branch_id):
+def DeliveryFeeEstimate(request):
+    """
+    Distance-based delivery fee, replacing the old fixed per-branch zones.
+    KES 150 flat within 10km, then +KES 50 for every extra 10km (or part
+    thereof). Usage: /api/branches/delivery_fee/?branch_id=1&lat=-1.27&lng=36.81
+    """
+    branch_id = request.query_params.get('branch_id')
+    latitude = request.query_params.get('lat')
+    longitude = request.query_params.get('lng')
+
+    if not branch_id or not latitude or not longitude:
+        return Response({'error': 'branch_id, lat and lng query parameters are required'}, status = 400)
+
     try:
-        branch = Branch.objects.get(id = branch_id)
+        branch = Branch.objects.get(id = branch_id, is_active = True)
     except Branch.DoesNotExist:
         return Response({'error': 'Branch not found'}, status = 404)
 
-    zones = DeliveryZone.objects.filter(
-        branch = branch,
-        is_active = True
-    ).order_by('zone_name')
+    try:
+        float(latitude)
+        float(longitude)
+    except ValueError:
+        return Response({'error': 'lat and lng must be valid numbers'}, status = 400)
 
-    data = []
-    for zone in zones:
-        data.append({
-            'id': zone.id,
-            'zone_name': zone.zone_name,
-            'delivery_fee': str(zone.delivery_fee),
-            'is_active': zone.is_active,
-            'latitude': str(zone.latitude) if zone.latitude is not None else None,
-            'longitude': str(zone.longitude) if zone.longitude is not None else None,
-        })
+    distance_km = CalculateDistance(latitude, longitude, branch.latitude, branch.longitude)
+    delivery_fee = CalculateDeliveryFee(distance_km)
 
     return Response({
         'branch': branch.branch_name,
-        'delivery_zones': data
+        'distance_km': round(distance_km, 2),
+        'delivery_fee': delivery_fee,
     }, status = 200)
 
-
-# ─── CREATE DELIVERY ZONE (branch manager for own branch, admin for any) ───────
-
-@api_view(['POST'])
-@permission_classes([IsAdminOrBranchManager])
-def CreateDeliveryZone(request):
-    zone_name = request.data.get('zone_name')
-    delivery_fee = request.data.get('delivery_fee')
-    latitude = request.data.get('latitude') or None
-    longitude = request.data.get('longitude') or None
-
-    if not zone_name or not delivery_fee:
-        return Response({'error': 'zone_name and delivery_fee are required'}, status = 400)
-
-    # Determine branch based on role
-    if request.user.role == 'branch_manager':
-        try:
-            branch = request.user.managed_branch
-        except Exception:
-            return Response({'error': 'You are not assigned to any branch'}, status = 404)
-    else:
-        # Admin must provide branch_id
-        branch_id = request.data.get('branch_id')
-        if not branch_id:
-            return Response({'error': 'branch_id is required for admin'}, status = 400)
-        try:
-            branch = Branch.objects.get(id = branch_id)
-        except Branch.DoesNotExist:
-            return Response({'error': 'Branch not found'}, status = 404)
-
-    # NEW: Check duplicate zone name for this branch (case insensitive)
-    if DeliveryZone.objects.filter(
-        branch = branch,
-        zone_name__iexact = zone_name
-    ).exists():
-        return Response({
-            'error': f'Zone "{zone_name}" already exists for {branch.branch_name}'
-        }, status = 400)
-
-    zone = DeliveryZone.objects.create(
-        branch = branch,
-        zone_name = zone_name,
-        delivery_fee = delivery_fee,
-        latitude = latitude,
-        longitude = longitude,
-    )
-
-    return Response({
-        'message': 'Delivery zone created successfully',
-        'zone': {
-            'id': zone.id,
-            'branch': zone.branch.branch_name,
-            'zone_name': zone.zone_name,
-            'delivery_fee': str(zone.delivery_fee),
-            'is_active': zone.is_active,
-            'latitude': str(zone.latitude) if zone.latitude is not None else None,
-            'longitude': str(zone.longitude) if zone.longitude is not None else None,
-        }
-    }, status = 201)
-
-
-# ─── UPDATE DELIVERY ZONE (branch manager for own, admin for any) ──────────────
-
-@api_view(['PUT'])
-@permission_classes([IsAdminOrBranchManager])
-def UpdateDeliveryZone(request, zone_id):
-    try:
-        zone = DeliveryZone.objects.select_related('branch').get(id = zone_id)
-    except DeliveryZone.DoesNotExist:
-        return Response({'error': 'Delivery zone not found'}, status = 404)
-
-    # Branch manager can only update their own branch zones
-    if request.user.role == 'branch_manager':
-        try:
-            branch = request.user.managed_branch
-        except Exception:
-            return Response({'error': 'You are not assigned to any branch'}, status = 404)
-        if zone.branch != branch:
-            return Response({'error': 'You can only update zones in your own branch'}, status = 403)
-
-    new_zone_name = request.data.get('zone_name')
-
-    # NEW: Check duplicate zone name excluding current zone
-    if new_zone_name and DeliveryZone.objects.filter(
-        branch = zone.branch,
-        zone_name__iexact = new_zone_name
-    ).exclude(id = zone_id).exists():
-        return Response({
-            'error': f'Zone "{new_zone_name}" already exists for {zone.branch.branch_name}'
-        }, status = 400)
-
-    zone.zone_name = new_zone_name or zone.zone_name
-    zone.delivery_fee = request.data.get('delivery_fee', zone.delivery_fee)
-    zone.is_active = request.data.get('is_active', zone.is_active)
-    zone.latitude = request.data.get('latitude', zone.latitude) or None
-    zone.longitude = request.data.get('longitude', zone.longitude) or None
-    zone.save()
-
-    return Response({
-        'message': 'Delivery zone updated successfully',
-        'zone': {
-            'id': zone.id,
-            'branch': zone.branch.branch_name,
-            'zone_name': zone.zone_name,
-            'delivery_fee': str(zone.delivery_fee),
-            'is_active': zone.is_active,
-            'latitude': str(zone.latitude) if zone.latitude is not None else None,
-            'longitude': str(zone.longitude) if zone.longitude is not None else None,
-        }
-    }, status = 200)
-
-
-# ─── DELETE DELIVERY ZONE (branch manager for own, admin for any) ──────────────
-
-@api_view(['DELETE'])
-@permission_classes([IsAdminOrBranchManager])
-def DeleteDeliveryZone(request, zone_id):
-    try:
-        zone = DeliveryZone.objects.select_related('branch').get(id = zone_id)
-    except DeliveryZone.DoesNotExist:
-        return Response({'error': 'Delivery zone not found'}, status = 404)
-
-    # Branch manager can only delete their own branch zones
-    if request.user.role == 'branch_manager':
-        try:
-            branch = request.user.managed_branch
-        except Exception:
-            return Response({'error': 'You are not assigned to any branch'}, status = 404)
-        if zone.branch != branch:
-            return Response({'error': 'You can only delete zones in your own branch'}, status = 403)
-
-    zone_name = zone.zone_name
-    zone.delete()
-    return Response({'message': f'Delivery zone "{zone_name}" deleted successfully'}, status = 200)
-
-
-# ─── MY BRANCH DELIVERY ZONES (branch manager only) ───────────────────────────
-
-@api_view(['GET'])
-@permission_classes([IsBranchManager])
-def MyBranchDeliveryZones(request):
-    try:
-        branch = request.user.managed_branch
-    except Exception:
-        return Response({'error': 'You are not assigned to any branch'}, status = 404)
-
-    zones = DeliveryZone.objects.filter(branch = branch).order_by('zone_name')
-
-    data = []
-    for zone in zones:
-        data.append({
-            'id': zone.id,
-            'zone_name': zone.zone_name,
-            'delivery_fee': str(zone.delivery_fee),
-            'is_active': zone.is_active,
-            'latitude': str(zone.latitude) if zone.latitude is not None else None,
-            'longitude': str(zone.longitude) if zone.longitude is not None else None,
-        })
-
-    return Response({
-        'branch': branch.branch_name,
-        'delivery_zones': data
-    }, status = 200)
 
 
 

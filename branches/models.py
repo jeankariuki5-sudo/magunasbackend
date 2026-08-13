@@ -19,21 +19,4 @@ class Branch(BaseModel):
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
-        return self.branch_name    
-
-# =========================================
-# Delivery zone Model
-# =========================================
-class DeliveryZone(models.Model):
-    branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='delivery_zones')
-    zone_name = models.CharField(max_length=100)
-    delivery_fee = models.DecimalField(max_digits=10, decimal_places=2)
-    is_active = models.BooleanField(default=True)
-    # NEW: optional center point for this zone, set via the map picker on the
-    # frontend. Nullable since existing zones (and admins who don't care to
-    # pin one) shouldn't be forced to have coordinates.
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-
-    def __str__(self):
-        return f"{self.zone_name} - {self.branch.branch_name}"
+        return self.branch_name

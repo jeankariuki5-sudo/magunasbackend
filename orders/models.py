@@ -1,7 +1,7 @@
 from django.db import models
 from accounts.models import User, BaseModel
 from products.models import BranchProduct
-from branches.models import Branch, DeliveryZone
+from branches.models import Branch
 
 # Create your models here.
 # ========================================
@@ -52,8 +52,13 @@ class Order(BaseModel):
     customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='orders')
     branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='orders')
     fulfillment_type = models.CharField(max_length=10, choices=FULFILLMENT_CHOICES)
-    delivery_zone = models.ForeignKey(DeliveryZone, on_delete=models.SET_NULL, null=True, blank=True)
     delivery_address = models.TextField(blank=True)
+    # Customer's chosen delivery point. Used at checkout to calculate
+    # delivery_fee by distance from the branch (see branches/haversine.py),
+    # and kept here (rather than just the computed fee) so the branch/rider
+    # has an actual location to navigate to.
+    delivery_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    delivery_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='placed')
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     delivery_fee = models.DecimalField(max_digits=8, decimal_places=2, default=0)

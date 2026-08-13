@@ -13,12 +13,8 @@ urlpatterns = [
     path('list_managers/', views.ListManagers),
     path('my_branch/', views.MyBranch),
 
-    # Delivery zones
-    path('delivery_zones/<int:branch_id>/', views.ListDeliveryZones),
-    path('delivery_zones/create/', views.CreateDeliveryZone),
-    path('delivery_zones/update/<int:zone_id>/', views.UpdateDeliveryZone),
-    path('delivery_zones/delete/<int:zone_id>/', views.DeleteDeliveryZone),
-    path('delivery_zones/my_branch/', views.MyBranchDeliveryZones),
+    # Delivery fee (distance-based, replaces old zones)
+    path('delivery_fee/', views.DeliveryFeeEstimate),
 
     # Geolocation
     path('nearest/', views.NearestBranch),

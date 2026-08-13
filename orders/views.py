@@ -10,7 +10,8 @@ from django_ratelimit.exceptions import Ratelimited
 from django.http import JsonResponse
 
 from accounts.permissions import IsAdmin, IsBranchManager, IsCustomer, IsAdminOrBranchManager
-from branches.models import Branch, DeliveryZone
+from branches.models import Branch
+from branches.haversine import CalculateDistance, CalculateDeliveryFee
 from products.models import BranchProduct
 from loyalty.utils import GetEffectivePrice, RedeemPoints, ReverseRedeemedPoints
 from .models import Cart, CartItem, Order, OrderItem
@@ -277,7 +278,8 @@ def ClearCart(request):
 def PlaceOrder(request):
     fulfillment_type = request.data.get('fulfillment_type')  # delivery or pickup
     delivery_address = request.data.get('delivery_address', '')
-    delivery_zone_id = request.data.get('delivery_zone_id')
+    delivery_latitude = request.data.get('delivery_latitude')
+    delivery_longitude = request.data.get('delivery_longitude')
     points_to_redeem = int(request.data.get('points_to_redeem', 0) or 0)
 
     if getattr(request, 'limited', False):
@@ -292,8 +294,8 @@ def PlaceOrder(request):
     if fulfillment_type == 'delivery' and not delivery_address:
         return Response({'error': 'delivery_address is required for delivery orders'}, status = 400)
 
-    if fulfillment_type == 'delivery' and not delivery_zone_id:
-        return Response({'error': 'delivery_zone_id is required for delivery orders'}, status = 400)
+    if fulfillment_type == 'delivery' and (not delivery_latitude or not delivery_longitude):
+        return Response({'error': 'delivery_latitude and delivery_longitude are required for delivery orders'}, status = 400)
 
     if points_to_redeem < 0:
         return Response({'error': 'points_to_redeem cannot be negative'}, status = 400)
@@ -309,20 +311,20 @@ def PlaceOrder(request):
     if not cart_items.exists():
         return Response({'error': 'Your cart is empty'}, status = 400)
 
-    # Validate delivery zone
-    delivery_zone = None
+    # Delivery fee is purely distance-based now - KES 150 within 10km,
+    # +KES 50 per extra 10km from the branch to the customer's pin.
     delivery_fee = 0
+    distance_km = None
 
     if fulfillment_type == 'delivery':
         try:
-            delivery_zone = DeliveryZone.objects.get(
-                id = delivery_zone_id,
-                branch = cart.branch,
-                is_active =  True
+            distance_km = CalculateDistance(
+                delivery_latitude, delivery_longitude,
+                cart.branch.latitude, cart.branch.longitude
             )
-            delivery_fee = delivery_zone.delivery_fee
-        except DeliveryZone.DoesNotExist:
-            return Response({'error': 'Invalid or inactive delivery zone for this branch'}, status = 404)
+        except (TypeError, ValueError):
+            return Response({'error': 'delivery_latitude and delivery_longitude must be valid numbers'}, status = 400)
+        delivery_fee = CalculateDeliveryFee(distance_km)
 
     # Validate stock and calculate total using the effective (promotion-aware) price
     items_total = 0
@@ -363,8 +365,9 @@ def PlaceOrder(request):
         customer = request.user,
         branch = cart.branch,
         fulfillment_type = fulfillment_type,
-        delivery_zone = delivery_zone,
         delivery_address = delivery_address,
+        delivery_latitude = delivery_latitude if fulfillment_type == 'delivery' else None,
+        delivery_longitude = delivery_longitude if fulfillment_type == 'delivery' else None,
         total_amount = total_amount,
         delivery_fee = delivery_fee,
         status = 'placed'
@@ -413,7 +416,7 @@ def PlaceOrder(request):
             'branch': order.branch.branch_name,
             'fulfillment_type': order.fulfillment_type,
             'delivery_address': order.delivery_address,
-            'delivery_zone': delivery_zone.zone_name if delivery_zone else None,
+            'delivery_distance_km': round(distance_km, 2) if distance_km is not None else None,
             'delivery_fee': str(order.delivery_fee),
             'points_redeemed': points_to_redeem,
             'points_discount': str(points_discount),
@@ -432,7 +435,7 @@ def PlaceOrder(request):
 def MyOrders(request):
     orders = Order.objects.filter(
         customer = request.user
-    ).select_related('branch', 'delivery_zone').order_by('-created_at')
+    ).select_related('branch').order_by('-created_at')
 
     # Filter by status
     status_filter = request.query_params.get('status')
@@ -447,7 +450,8 @@ def MyOrders(request):
             'branch': order.branch.branch_name,
             'fulfillment_type': order.fulfillment_type,
             'delivery_address': order.delivery_address,
-            'delivery_zone': order.delivery_zone.zone_name if order.delivery_zone else None,
+            'delivery_latitude': str(order.delivery_latitude) if order.delivery_latitude is not None else None,
+            'delivery_longitude': str(order.delivery_longitude) if order.delivery_longitude is not None else None,
             'delivery_fee': str(order.delivery_fee),
             'total_amount': str(order.total_amount),
             'status': order.status,
@@ -473,9 +477,7 @@ def MyOrders(request):
 @permission_classes([IsCustomer])
 def GetMyOrder(request, order_id):
     try:
-        order = Order.objects.select_related(
-            'branch', 'delivery_zone'
-        ).get(id = order_id, customer = request.user)
+        order = Order.objects.select_related('branch').get(id = order_id, customer = request.user)
     except Order.DoesNotExist:
         return Response({'error': 'Order not found'}, status = 404)
 
@@ -486,7 +488,8 @@ def GetMyOrder(request, order_id):
         'branch': order.branch.branch_name,
         'fulfillment_type': order.fulfillment_type,
         'delivery_address': order.delivery_address,
-        'delivery_zone': order.delivery_zone.zone_name if order.delivery_zone else None,
+        'delivery_latitude': str(order.delivery_latitude) if order.delivery_latitude is not None else None,
+        'delivery_longitude': str(order.delivery_longitude) if order.delivery_longitude is not None else None,
         'delivery_fee': str(order.delivery_fee),
         'total_amount': str(order.total_amount),
         'status': order.status,
@@ -580,7 +583,7 @@ def BranchOrders(request):
 
     orders = Order.objects.filter(
         branch=branch
-    ).select_related('customer', 'delivery_zone').order_by('-created_at')
+    ).select_related('customer').order_by('-created_at')
 
     # Filter by status
     status_filter = request.query_params.get('status')
@@ -600,7 +603,8 @@ def BranchOrders(request):
             'customer': order.customer.username,
             'fulfillment_type': order.fulfillment_type,
             'delivery_address': order.delivery_address,
-            'delivery_zone': order.delivery_zone.zone_name if order.delivery_zone else None,
+            'delivery_latitude': str(order.delivery_latitude) if order.delivery_latitude is not None else None,
+            'delivery_longitude': str(order.delivery_longitude) if order.delivery_longitude is not None else None,
             'delivery_fee': str(order.delivery_fee),
             'total_amount': str(order.total_amount),
             'status': order.status,
@@ -677,7 +681,7 @@ def UpdateOrderStatus(request, order_id):
 @permission_classes([IsAdmin])
 def AllOrders(request):
     orders = Order.objects.select_related(
-        'customer', 'branch', 'delivery_zone'
+        'customer', 'branch'
     ).order_by('-created_at')
 
     # Filters
@@ -702,7 +706,8 @@ def AllOrders(request):
             'branch': order.branch.branch_name,
             'fulfillment_type': order.fulfillment_type,
             'delivery_address': order.delivery_address,
-            'delivery_zone': order.delivery_zone.zone_name if order.delivery_zone else None,
+            'delivery_latitude': str(order.delivery_latitude) if order.delivery_latitude is not None else None,
+            'delivery_longitude': str(order.delivery_longitude) if order.delivery_longitude is not None else None,
             'delivery_fee': str(order.delivery_fee),
             'total_amount': str(order.total_amount),
             'status': order.status,
@@ -731,11 +736,11 @@ def GetOrder(request, order_id):
         if request.user.role == 'branch_manager':
             branch = request.user.managed_branch
             order = Order.objects.select_related(
-                'customer', 'branch', 'delivery_zone'
+                'customer', 'branch'
             ).get(id = order_id, branch = branch)
         else:
             order = Order.objects.select_related(
-                'customer', 'branch', 'delivery_zone'
+                'customer', 'branch'
             ).get(id = order_id)
     except Order.DoesNotExist:
         return Response({'error': 'Order not found'}, status = 404)
@@ -750,7 +755,8 @@ def GetOrder(request, order_id):
         'branch': order.branch.branch_name,
         'fulfillment_type': order.fulfillment_type,
         'delivery_address': order.delivery_address,
-        'delivery_zone': order.delivery_zone.zone_name if order.delivery_zone else None,
+        'delivery_latitude': str(order.delivery_latitude) if order.delivery_latitude is not None else None,
+        'delivery_longitude': str(order.delivery_longitude) if order.delivery_longitude is not None else None,
         'delivery_fee': str(order.delivery_fee),
         'total_amount': str(order.total_amount),
         'status': order.status,
