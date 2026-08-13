@@ -225,6 +225,34 @@ def AssignManager(request, branch_id):
     }, status=200)
 
 
+# ================================================
+#  Unassign manager from a branch (admin only)
+# ================================================
+@api_view(['POST'])
+@permission_classes([IsAdmin])
+def UnassignManager(request, branch_id):
+    try:
+        branch = Branch.objects.get(id=branch_id)
+    except Branch.DoesNotExist:
+        return Response({'error': 'Branch not found'}, status=404)
+
+    if not branch.branch_manager:
+        return Response({'error': f'{branch.branch_name} has no manager assigned'}, status=400)
+
+    former_manager_username = branch.branch_manager.username
+    branch.branch_manager = None
+    branch.save()
+
+    return Response({
+        'message': f'{former_manager_username} unassigned from {branch.branch_name} successfully',
+        'branch': {
+            'id': branch.id,
+            'branch_name': branch.branch_name,
+            'branch_manager': None,
+        }
+    }, status=200)
+
+
 # ====================================================
 # List available managers (admin only)
 # =====================================================

@@ -9,6 +9,7 @@ urlpatterns = [
     path('update_branch/<int:branch_id>/', views.UpdateBranch),
     path('delete_branch/<int:branch_id>/', views.DeleteBranch),
     path('assign_manager/<int:branch_id>/', views.AssignManager),
+    path('unassign_manager/<int:branch_id>/', views.UnassignManager),
     path('list_managers/', views.ListManagers),
     path('my_branch/', views.MyBranch),
 
