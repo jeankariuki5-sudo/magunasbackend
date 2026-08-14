@@ -16,6 +16,7 @@ from .dashboard_serializers import (
 from branches.models import Branch
 from products.models import BranchProduct
 from orders.models import Order
+from payments.models import Payment
 
 
 # ══════════════════════════════════════════════════════
@@ -39,13 +40,21 @@ def AdminDashboard(request):
     all_orders = Order.objects.all()
     total_orders = all_orders.count()
     pending_orders = all_orders.filter(status = 'placed').count()
-    completed_orders = all_orders.filter(status = 'completed').count()
+    # FIXED: was filtering status = 'completed', which isn't a real value in
+    # Order.STATUS_CHOICES (never gets set anywhere) - this count was always
+    # zero, no matter how many orders were actually delivered.
+    completed_orders = all_orders.filter(status = 'delivered').count()
     cancelled_orders = all_orders.filter(status = 'cancelled').count()
 
     # ── Revenue ──
-    total_revenue = all_orders.filter(
-        status = 'completed'
-    ).aggregate(total = Sum('total_amount'))['total'] or 0
+    # FIXED: was summing total_amount on status='completed' orders (always
+    # zero, same bug as above). Revenue should reflect money actually
+    # collected, which is what a *successful* Payment represents - not order
+    # status, since a paid order can still be sitting at 'packed' or
+    # 'out_for_delivery' for a while before it's marked delivered.
+    total_revenue = Payment.objects.filter(
+        status = 'success'
+    ).aggregate(total = Sum('amount'))['total'] or 0
 
     # ── Recent orders ──
     recent_orders = Order.objects.select_related(
@@ -115,23 +124,29 @@ def BranchManagerDashboard(request):
     packed_orders = branch_orders.filter(status = 'packed').count()
     out_for_delivery = branch_orders.filter(status = 'out_for_delivery').count()
     ready_for_pickup = branch_orders.filter(status = 'ready_for_pickup').count()
-    completed_orders = branch_orders.filter(status = 'completed').count()
+    # FIXED: was filtering status = 'completed', which isn't a real value in
+    # Order.STATUS_CHOICES - always zero. 'delivered' is the model's actual
+    # terminal fulfillment state.
+    completed_orders = branch_orders.filter(status = 'delivered').count()
     cancelled_orders = branch_orders.filter(status = 'cancelled').count()
 
     # ── Revenue ──
-    total_revenue = branch_orders.filter(
-        status = 'completed'
-    ).aggregate(total = Sum('total_amount'))['total'] or 0
+    # FIXED: was summing total_amount on status='completed' orders (always
+    # zero). Revenue now reflects actual successful M-Pesa payments for this
+    # branch, and the today/month windows use the payment's confirmed_at
+    # (when the money actually came in) rather than the order's created_at
+    # (when it was placed, possibly before payment even happened).
+    branch_payments = Payment.objects.filter(order__branch = branch, status = 'success')
 
-    todays_revenue = branch_orders.filter(
-        status = 'completed',
-        created_at__date = today
-    ).aggregate(total = Sum('total_amount'))['total'] or 0
+    total_revenue = branch_payments.aggregate(total = Sum('amount'))['total'] or 0
 
-    monthly_revenue = branch_orders.filter(
-        status = 'completed',
-        created_at__date__gte = month_start
-    ).aggregate(total = Sum('total_amount'))['total'] or 0
+    todays_revenue = branch_payments.filter(
+        confirmed_at__date = today
+    ).aggregate(total = Sum('amount'))['total'] or 0
+
+    monthly_revenue = branch_payments.filter(
+        confirmed_at__date__gte = month_start
+    ).aggregate(total = Sum('amount'))['total'] or 0
 
     # ── Recent orders ──
     recent_orders = branch_orders.select_related(
@@ -205,13 +220,23 @@ def CustomerDashboard(request):
     customer_orders = Order.objects.filter(customer = user)
     total_orders = customer_orders.count()
     pending_orders = customer_orders.filter(status = 'placed').count()
-    completed_orders = customer_orders.filter(status = 'completed').count()
+    # FIXED: was filtering status = 'completed', which isn't a real value in
+    # Order.STATUS_CHOICES - this was always zero regardless of how many
+    # orders the customer actually had delivered.
+    completed_orders = customer_orders.filter(status = 'delivered').count()
     cancelled_orders = customer_orders.filter(status = 'cancelled').count()
 
     # ── Total spent ──
-    total_spent = customer_orders.filter(
-        status = 'completed'
-    ).aggregate(total = Sum('total_amount'))['total'] or 0
+    # FIXED: was summing total_amount on status='completed' orders - always
+    # zero (same bug), and even fixed to 'delivered' it would still miss any
+    # order that's been paid but not yet delivered. "Total Spent" should
+    # reflect money actually paid, so it's now driven by successful Payment
+    # records instead of order/delivery status - this is what makes a
+    # payment show up here immediately after the M-Pesa callback confirms
+    # it, rather than only once the order is later marked delivered.
+    total_spent = Payment.objects.filter(
+        order__customer = user, status = 'success'
+    ).aggregate(total = Sum('amount'))['total'] or 0
 
     # ── Cart summary ──
     cart_data = {}
